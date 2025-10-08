@@ -9,7 +9,7 @@
 #define MIN(x, y) ((x) <= (y) ? (x) : (y))
 #define ABS(x) ((x) >= 0 ? (x) : -(x))
 
-#define PREVIEW_COLOR (Color) {0, 0, 0, 200}
+#define BACKGROUND_COLOR DARKGRAY
 #define BLOC_COLOR BLACK
 
 typedef enum {
@@ -27,18 +27,30 @@ Rectangle hull(Vector2 a, Vector2 b) {
     return result;
 }
 
+void print_usage(const char *program) {
+    printf("Usage: %s <IMAGE-FILE>\n", program);
+}
+
 int main(int argc, const char **argv) {
     if (argc < 2) {
-        printf("Usage: %s <FILE>\n", argv[0]);
+        print_usage(argv[0]);
         exit(1);
     }
     const char *input_path = argv[1];
 
+    if (!FileExists(input_path)) {
+        printf("[ERROR]: file '%s' does not exist\n", input_path);
+        exit(1);
+    }
+
     Image img = LoadImage(input_path);
-    assert(img.width > 0);
-    assert(img.height > 0);
+    if (img.width <= 0 || img.height <= 0) {
+        printf("[ERROR]: could not load image '%s'\n", input_path);
+        exit(1);
+    }
 
     InitWindow(img.width, img.height, "Bloc");
+    SetWindowState(FLAG_WINDOW_RESIZABLE);
     SetTargetFPS(60);
 
     Texture tex = LoadTextureFromImage(img);
@@ -62,14 +74,29 @@ int main(int argc, const char **argv) {
                     break;
             }
         }
+        if (IsKeyPressed(KEY_U)) {
+            UNIMPLEMENTED("undo");
+        }
+        if (IsKeyPressed(KEY_R)) {
+            UNIMPLEMENTED("redo");
+        }
+
+        float wheel = GetMouseWheelMove();
+        if (wheel > 0.1) {
+            UNIMPLEMENTED("zoom in");
+        } else if (wheel < -0.1) {
+            UNIMPLEMENTED("zoom out");
+        }
+
         BeginDrawing();
+        ClearBackground(BACKGROUND_COLOR);
         DrawTexture(tex, 0, 0, WHITE);
         switch (mode) {
             case SELECT_FST:
                 break;
             case SELECT_SND:
                 Rectangle preview = hull(fst_point, GetMousePosition());
-                DrawRectangleRec(preview, PREVIEW_COLOR);
+                DrawRectangleRec(preview, ColorAlpha(BLOC_COLOR, 0.7));
                 break;
         }
         EndDrawing();
