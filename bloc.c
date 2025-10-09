@@ -60,6 +60,33 @@ Vector2 ilerp_rec(Rectangle r, Vector2 t) {
     return result;
 }
 
+struct {
+    Vector2 *items;
+    size_t count;
+    size_t capacity;
+} stack = {
+    .items = NULL,
+    .count = 0,
+    .capacity = 0,
+};
+
+void push_point(Vector2 v) {
+    if (stack.capacity == 0) {
+        stack.capacity = 16;
+        stack.count = 0;
+        stack.items = malloc(sizeof(v) * stack.capacity);
+    }
+    assert(stack.count <= stack.capacity);
+    if (stack.count == stack.capacity) {
+        stack.capacity *= 2;
+        stack.items = realloc(stack.items, sizeof(v) * stack.capacity);
+        assert(stack.items != NULL);
+    }
+    assert(stack.count < stack.capacity);
+    stack.items[stack.count] = v;
+    stack.count++;
+}
+
 void print_usage(const char *program) {
     printf("Usage: %s <IMAGE-FILE>\n", program);
 }
@@ -88,9 +115,6 @@ int main(int argc, const char **argv) {
 
     Texture tex = LoadTextureFromImage(img);
 
-    Mode mode = SELECT_FST;
-    Vector2 fst_point;
-
     while (!WindowShouldClose()) {
         Rectangle screen = {
             .x = 0,
@@ -109,23 +133,12 @@ int main(int argc, const char **argv) {
         Vector2 mouse_view = ilerp_rec(dst, GetMousePosition());
 
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-            switch (mode) {
-                case SELECT_FST:
-                    fst_point = mouse_view;
-                    mode = SELECT_SND;
-                    break;
-                case SELECT_SND:
-                    Vector2 snd_point = mouse_view;
-                    Rectangle rec = hull(lerp_rec(src, fst_point), lerp_rec(src, snd_point));
-                    ImageDrawRectangleRec(&img, rec, BLOC_COLOR);
-                    UnloadTexture(tex);
-                    tex = LoadTextureFromImage(img);
-                    mode = SELECT_FST;
-                    break;
-            }
+            push_point(mouse_view);
         }
         if (IsKeyPressed(KEY_U)) {
-            UNIMPLEMENTED("undo");
+            if (stack.count > 0) {
+                stack.count--;
+            }
         }
         if (IsKeyPressed(KEY_R)) {
             UNIMPLEMENTED("redo");
@@ -146,20 +159,36 @@ int main(int argc, const char **argv) {
         //DrawRectangleRec(dst, RED);
         DrawTexturePro(tex, src, dst, Vector2Zero(), 0, WHITE);
 
-        switch (mode) {
-            case SELECT_FST:
-                break;
-            case SELECT_SND:
-                Rectangle preview = hull(lerp_rec(dst, fst_point), lerp_rec(dst, mouse_view));
-                DrawRectangleRec(preview, ColorAlpha(BLOC_COLOR, 0.7));
-                break;
+        for (size_t i=0; i< stack.count/2; i++) {
+            Rectangle r = hull(lerp_rec(dst, stack.items[2*i]), lerp_rec(dst, stack.items[2*i+1]));
+            DrawRectangleRec(r, BLOC_COLOR);
         }
+
+        if (stack.count % 2 == 1) {
+            Rectangle preview = hull(lerp_rec(dst, stack.items[stack.count-1]), lerp_rec(dst, mouse_view));
+            DrawRectangleRec(preview, ColorAlpha(BLOC_COLOR, 0.7));
+        }
+
         EndDrawing();
     }
 
     CloseWindow();
 
-    if (!ExportImage(img, "out.jpg")) {
-        UNIMPLEMENTED("export failure");
+    if (stack.count >= 2) {
+        Rectangle src = {
+            .x = 0,
+            .y = 0,
+            .width = img.width,
+            .height = img.height,
+        };
+        for (size_t i=0; i<stack.count/2; i++) {
+            Rectangle rec = hull(lerp_rec(src, stack.items[2*i]), lerp_rec(src, stack.items[2*i+1]));
+            ImageDrawRectangleRec(&img, rec, BLOC_COLOR);
+        }
+
+        if (!ExportImage(img, "out.jpg")) {
+            UNIMPLEMENTED("export failure");
+        }
     }
+    if (stack.items != NULL) free(stack.items);
 }
