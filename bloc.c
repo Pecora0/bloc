@@ -5,6 +5,7 @@
 #include "devutils.h"
 
 #include <raylib.h>
+#include <raymath.h>
 
 #define MIN(x, y) ((x) <= (y) ? (x) : (y))
 #define ABS(x) ((x) >= 0 ? (x) : -(x))
@@ -23,6 +24,38 @@ Rectangle hull(Vector2 a, Vector2 b) {
         .y = MIN(a.y, b.y),
         .width  = ABS(b.x - a.x),
         .height = ABS(b.y - a.y),
+    };
+    return result;
+}
+
+Rectangle fit(Rectangle outer, float aspect) {
+    // aspect = width / height
+    assert(aspect > 0);
+    Rectangle result;
+    result.width = MIN(aspect * outer.height, outer.width);
+    result.height = result.width / aspect;
+
+    //center
+    result.x = (outer.width - result.width) / 2   + outer.x;
+    result.y = (outer.height - result.height) / 2 + outer.y;
+
+    return result;
+}
+
+Vector2 lerp_rec(Rectangle r, Vector2 t) {
+    Vector2 result = {
+        .x = r.x + t.x * r.width,
+        .y = r.y + t.y * r.height,
+    };
+    return result;
+}
+
+Vector2 ilerp_rec(Rectangle r, Vector2 t) {
+    assert(r.width != 0);
+    assert(r.height != 0);
+    Vector2 result = {
+        .x = (t.x - r.x) / r.width,
+        .y = (t.y - r.y) / r.height,
     };
     return result;
 }
@@ -49,7 +82,7 @@ int main(int argc, const char **argv) {
         exit(1);
     }
 
-    InitWindow(img.width, img.height, "Bloc");
+    InitWindow(800, 600, "Bloc");
     SetWindowState(FLAG_WINDOW_RESIZABLE);
     SetTargetFPS(60);
 
@@ -59,14 +92,31 @@ int main(int argc, const char **argv) {
     Vector2 fst_point;
 
     while (!WindowShouldClose()) {
+        Rectangle screen = {
+            .x = 0,
+            .y = 0,
+            .width = GetScreenWidth(),
+            .height = GetScreenHeight(),
+        };
+        Rectangle src = {
+            .x = 0,
+            .y = 0,
+            .width = tex.width,
+            .height = tex.height,
+        };
+        Rectangle dst = fit(screen, (float) tex.width / (float) tex.height);
+
+        Vector2 mouse_view = ilerp_rec(dst, GetMousePosition());
+
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
             switch (mode) {
                 case SELECT_FST:
-                    fst_point = GetMousePosition();
+                    fst_point = mouse_view;
                     mode = SELECT_SND;
                     break;
                 case SELECT_SND:
-                    Rectangle rec = hull(fst_point, GetMousePosition());
+                    Vector2 snd_point = mouse_view;
+                    Rectangle rec = hull(lerp_rec(src, fst_point), lerp_rec(src, snd_point));
                     ImageDrawRectangleRec(&img, rec, BLOC_COLOR);
                     UnloadTexture(tex);
                     tex = LoadTextureFromImage(img);
@@ -80,6 +130,9 @@ int main(int argc, const char **argv) {
         if (IsKeyPressed(KEY_R)) {
             UNIMPLEMENTED("redo");
         }
+        if (IsKeyPressed(KEY_S)) {
+            UNIMPLEMENTED("save");
+        }
 
         float wheel = GetMouseWheelMove();
         if (wheel > 0.1) {
@@ -90,12 +143,14 @@ int main(int argc, const char **argv) {
 
         BeginDrawing();
         ClearBackground(BACKGROUND_COLOR);
-        DrawTexture(tex, 0, 0, WHITE);
+        //DrawRectangleRec(dst, RED);
+        DrawTexturePro(tex, src, dst, Vector2Zero(), 0, WHITE);
+
         switch (mode) {
             case SELECT_FST:
                 break;
             case SELECT_SND:
-                Rectangle preview = hull(fst_point, GetMousePosition());
+                Rectangle preview = hull(lerp_rec(dst, fst_point), lerp_rec(dst, mouse_view));
                 DrawRectangleRec(preview, ColorAlpha(BLOC_COLOR, 0.7));
                 break;
         }
