@@ -13,11 +13,6 @@
 #define BACKGROUND_COLOR DARKGRAY
 #define BLOC_COLOR BLACK
 
-typedef enum {
-    SELECT_FST,
-    SELECT_SND,
-} Mode;
-
 Rectangle hull(Vector2 a, Vector2 b) {
     Rectangle result = {
         .x = MIN(a.x, b.x),
@@ -62,10 +57,12 @@ Vector2 ilerp_rec(Rectangle r, Vector2 t) {
 
 struct {
     Vector2 *items;
+    size_t cursor;
     size_t count;
     size_t capacity;
 } stack = {
     .items = NULL,
+    .cursor = 0,
     .count = 0,
     .capacity = 0,
 };
@@ -73,18 +70,21 @@ struct {
 void push_point(Vector2 v) {
     if (stack.capacity == 0) {
         stack.capacity = 16;
+        stack.cursor = 0;
         stack.count = 0;
         stack.items = malloc(sizeof(v) * stack.capacity);
     }
+    assert(stack.cursor <= stack.count);
     assert(stack.count <= stack.capacity);
-    if (stack.count == stack.capacity) {
+    if (stack.cursor == stack.capacity) {
         stack.capacity *= 2;
         stack.items = realloc(stack.items, sizeof(v) * stack.capacity);
         assert(stack.items != NULL);
     }
-    assert(stack.count < stack.capacity);
-    stack.items[stack.count] = v;
-    stack.count++;
+    assert(stack.cursor < stack.capacity);
+    stack.items[stack.cursor] = v;
+    stack.cursor++;
+    stack.count = stack.cursor;
 }
 
 void print_usage(const char *program) {
@@ -136,12 +136,14 @@ int main(int argc, const char **argv) {
             push_point(mouse_view);
         }
         if (IsKeyPressed(KEY_U)) {
-            if (stack.count > 0) {
-                stack.count--;
+            if (stack.cursor > 0) {
+                stack.cursor--;
             }
         }
         if (IsKeyPressed(KEY_R)) {
-            UNIMPLEMENTED("redo");
+            if (stack.cursor < stack.count) {
+                stack.cursor++;
+            }
         }
         if (IsKeyPressed(KEY_S)) {
             UNIMPLEMENTED("save");
@@ -159,13 +161,13 @@ int main(int argc, const char **argv) {
         //DrawRectangleRec(dst, RED);
         DrawTexturePro(tex, src, dst, Vector2Zero(), 0, WHITE);
 
-        for (size_t i=0; i< stack.count/2; i++) {
+        for (size_t i=0; i< stack.cursor/2; i++) {
             Rectangle r = hull(lerp_rec(dst, stack.items[2*i]), lerp_rec(dst, stack.items[2*i+1]));
             DrawRectangleRec(r, BLOC_COLOR);
         }
 
-        if (stack.count % 2 == 1) {
-            Rectangle preview = hull(lerp_rec(dst, stack.items[stack.count-1]), lerp_rec(dst, mouse_view));
+        if (stack.cursor % 2 == 1) {
+            Rectangle preview = hull(lerp_rec(dst, stack.items[stack.cursor-1]), lerp_rec(dst, mouse_view));
             DrawRectangleRec(preview, ColorAlpha(BLOC_COLOR, 0.7));
         }
 
@@ -174,14 +176,14 @@ int main(int argc, const char **argv) {
 
     CloseWindow();
 
-    if (stack.count >= 2) {
+    if (stack.cursor >= 2) {
         Rectangle src = {
             .x = 0,
             .y = 0,
             .width = img.width,
             .height = img.height,
         };
-        for (size_t i=0; i<stack.count/2; i++) {
+        for (size_t i=0; i<stack.cursor/2; i++) {
             Rectangle rec = hull(lerp_rec(src, stack.items[2*i]), lerp_rec(src, stack.items[2*i+1]));
             ImageDrawRectangleRec(&img, rec, BLOC_COLOR);
         }
