@@ -12,6 +12,7 @@
 
 #define BACKGROUND_COLOR DARKGRAY
 #define BLOC_COLOR BLACK
+#define ZOOM_STEP 0.1
 
 Rectangle hull(Vector2 a, Vector2 b) {
     Rectangle result = {
@@ -115,6 +116,14 @@ int main(int argc, const char **argv) {
 
     Texture tex = LoadTextureFromImage(img);
 
+    Rectangle tex_rec = {
+        .x = 0,
+        .y = 0,
+        .width = tex.width,
+        .height = tex.height,
+    };
+    Rectangle src = tex_rec;
+
     while (!WindowShouldClose()) {
         Rectangle screen = {
             .x = 0,
@@ -122,15 +131,9 @@ int main(int argc, const char **argv) {
             .width = GetScreenWidth(),
             .height = GetScreenHeight(),
         };
-        Rectangle src = {
-            .x = 0,
-            .y = 0,
-            .width = tex.width,
-            .height = tex.height,
-        };
-        Rectangle dst = fit(screen, (float) tex.width / (float) tex.height);
+        Rectangle dst = fit(screen, src.width / src.height);
 
-        Vector2 mouse_view = ilerp_rec(dst, GetMousePosition());
+        Vector2 mouse_view = ilerp_rec(tex_rec, lerp_rec(src, ilerp_rec(dst, GetMousePosition())));
 
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
             push_point(mouse_view);
@@ -149,11 +152,29 @@ int main(int argc, const char **argv) {
             UNIMPLEMENTED("save");
         }
 
-        float wheel = GetMouseWheelMove();
-        if (wheel > 0.1) {
-            UNIMPLEMENTED("zoom in");
-        } else if (wheel < -0.1) {
-            UNIMPLEMENTED("zoom out");
+        // Zoom
+        {
+            float wheel = GetMouseWheelMove();
+            if (wheel > 0) {
+                src.width  *= 1 - ZOOM_STEP;
+                src.height *= 1 - ZOOM_STEP;
+            } else if (wheel < 0) {
+                src.width  *= 1 + ZOOM_STEP;
+                src.height *= 1 + ZOOM_STEP;
+                src.width = MIN(src.width, tex.width);
+                src.height = MIN(src.height, tex.height);
+            }
+        }
+
+        {
+            int key = GetKeyPressed();
+            if (key != 0) {
+                printf("[INFO] Keycode: %d (%c)\n", key, key);
+            }
+            int unicode = GetCharPressed();
+            if (unicode != 0) {
+                printf("[INFO] Char: %d (%c)\n", unicode, unicode);
+            }
         }
 
         BeginDrawing();
@@ -162,14 +183,22 @@ int main(int argc, const char **argv) {
         DrawTexturePro(tex, src, dst, Vector2Zero(), 0, WHITE);
 
         for (size_t i=0; i< stack.cursor/2; i++) {
-            Rectangle r = hull(lerp_rec(dst, stack.items[2*i]), lerp_rec(dst, stack.items[2*i+1]));
+            Rectangle r = hull(
+                    lerp_rec(dst, ilerp_rec(src, lerp_rec(tex_rec, stack.items[2*i+0]))), 
+                    lerp_rec(dst, ilerp_rec(src, lerp_rec(tex_rec, stack.items[2*i+1]))) 
+                    );
             DrawRectangleRec(r, BLOC_COLOR);
         }
 
         if (stack.cursor % 2 == 1) {
-            Rectangle preview = hull(lerp_rec(dst, stack.items[stack.cursor-1]), lerp_rec(dst, mouse_view));
+            Rectangle preview = hull(
+                    lerp_rec(dst, ilerp_rec(src, lerp_rec(tex_rec, stack.items[stack.cursor-1]))), 
+                    lerp_rec(dst, ilerp_rec(src, lerp_rec(tex_rec, mouse_view)))
+                    );
             DrawRectangleRec(preview, ColorAlpha(BLOC_COLOR, 0.7));
         }
+
+        DrawText(TextFormat("%.2f %.2f", mouse_view.x, mouse_view.y), 10, 10, 20, GREEN);
 
         EndDrawing();
     }
