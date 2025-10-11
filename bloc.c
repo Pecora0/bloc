@@ -38,20 +38,19 @@ Rectangle fit(Rectangle outer, float aspect) {
     return result;
 }
 
-Vector2 lerp_rec(Rectangle r, Vector2 t) {
-    Vector2 result = {
-        .x = r.x + t.x * r.width,
-        .y = r.y + t.y * r.height,
-    };
-    return result;
-}
+// NOTE: it makes sense to view a rectangle r as the affine transformation
+// (x , y) -> (r.width * x + r.x , r.height * y + r.y)
+// represented by the matrix
+// [ r.width        0 r.x ]
+// [       0 r.height r.y ]
+// [       0        0   1 ]
 
-Vector2 ilerp_rec(Rectangle r, Vector2 t) {
-    assert(r.width != 0);
-    assert(r.height != 0);
-    Vector2 result = {
-        .x = (t.x - r.x) / r.width,
-        .y = (t.y - r.y) / r.height,
+Matrix rectangle_to_matrix(Rectangle r) {
+    Matrix result = {
+        .m0 = r.width, .m4 = 0,        .m8  = 0, .m12 = r.x,
+        .m1 =       0, .m5 = r.height, .m9  = 0, .m13 = r.y,
+        .m2 =       0, .m6 = 0,        .m10 = 1, .m14 = 0,
+        .m3 =       0, .m7 = 0,        .m11 = 0, .m15 = 1,
     };
     return result;
 }
@@ -133,7 +132,16 @@ int main(int argc, const char **argv) {
         };
         Rectangle dst = fit(screen, src.width / src.height);
 
-        Vector2 mouse_view = ilerp_rec(tex_rec, lerp_rec(src, ilerp_rec(dst, GetMousePosition())));
+        Matrix screen_to_normal = MatrixMultiply(
+                MatrixInvert(rectangle_to_matrix(tex_rec)),
+                MatrixMultiply(
+                    rectangle_to_matrix(src),
+                    MatrixInvert(rectangle_to_matrix(dst))
+                    )
+                );
+        Matrix normal_to_screen = MatrixInvert(screen_to_normal);
+
+        Vector2 mouse_view = Vector2Transform(GetMousePosition(), screen_to_normal);
 
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
             push_point(mouse_view);
@@ -184,16 +192,16 @@ int main(int argc, const char **argv) {
 
         for (size_t i=0; i< stack.cursor/2; i++) {
             Rectangle r = hull(
-                    lerp_rec(dst, ilerp_rec(src, lerp_rec(tex_rec, stack.items[2*i+0]))), 
-                    lerp_rec(dst, ilerp_rec(src, lerp_rec(tex_rec, stack.items[2*i+1]))) 
+                    Vector2Transform(stack.items[2*i+0], normal_to_screen),
+                    Vector2Transform(stack.items[2*i+1], normal_to_screen)
                     );
             DrawRectangleRec(r, BLOC_COLOR);
         }
 
         if (stack.cursor % 2 == 1) {
             Rectangle preview = hull(
-                    lerp_rec(dst, ilerp_rec(src, lerp_rec(tex_rec, stack.items[stack.cursor-1]))), 
-                    lerp_rec(dst, ilerp_rec(src, lerp_rec(tex_rec, mouse_view)))
+                    Vector2Transform(stack.items[stack.cursor-1], normal_to_screen),
+                    Vector2Transform(mouse_view, normal_to_screen)
                     );
             DrawRectangleRec(preview, ColorAlpha(BLOC_COLOR, 0.7));
         }
@@ -212,8 +220,9 @@ int main(int argc, const char **argv) {
             .width = img.width,
             .height = img.height,
         };
+        Matrix normal_to_src = rectangle_to_matrix(src);
         for (size_t i=0; i<stack.cursor/2; i++) {
-            Rectangle rec = hull(lerp_rec(src, stack.items[2*i]), lerp_rec(src, stack.items[2*i+1]));
+            Rectangle rec = hull(Vector2Transform(stack.items[2*i], normal_to_src), Vector2Transform(stack.items[2*i+1], normal_to_src));
             ImageDrawRectangleRec(&img, rec, BLOC_COLOR);
         }
 
