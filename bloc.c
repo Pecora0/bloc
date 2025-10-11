@@ -121,7 +121,7 @@ int main(int argc, const char **argv) {
         .width = tex.width,
         .height = tex.height,
     };
-    Rectangle src = tex_rec;
+    Rectangle tex_part = tex_rec;
 
     while (!WindowShouldClose()) {
         Rectangle screen = {
@@ -130,13 +130,13 @@ int main(int argc, const char **argv) {
             .width = GetScreenWidth(),
             .height = GetScreenHeight(),
         };
-        Rectangle dst = fit(screen, src.width / src.height);
+        Rectangle display = fit(screen, tex_part.width / tex_part.height);
 
         Matrix screen_to_normal = MatrixMultiply(
                 MatrixInvert(rectangle_to_matrix(tex_rec)),
                 MatrixMultiply(
-                    rectangle_to_matrix(src),
-                    MatrixInvert(rectangle_to_matrix(dst))
+                    rectangle_to_matrix(tex_part),
+                    MatrixInvert(rectangle_to_matrix(display))
                     )
                 );
         Matrix normal_to_screen = MatrixInvert(screen_to_normal);
@@ -164,13 +164,13 @@ int main(int argc, const char **argv) {
         {
             float wheel = GetMouseWheelMove();
             if (wheel > 0) {
-                src.width  *= 1 - ZOOM_STEP;
-                src.height *= 1 - ZOOM_STEP;
+                tex_part.width  *= 1 - ZOOM_STEP;
+                tex_part.height *= 1 - ZOOM_STEP;
             } else if (wheel < 0) {
-                src.width  *= 1 + ZOOM_STEP;
-                src.height *= 1 + ZOOM_STEP;
-                src.width = MIN(src.width, tex.width);
-                src.height = MIN(src.height, tex.height);
+                tex_part.width  *= 1 + ZOOM_STEP;
+                tex_part.height *= 1 + ZOOM_STEP;
+                tex_part.width = MIN(tex_part.width, tex.width);
+                tex_part.height = MIN(tex_part.height, tex.height);
             }
         }
 
@@ -188,7 +188,7 @@ int main(int argc, const char **argv) {
         BeginDrawing();
         ClearBackground(BACKGROUND_COLOR);
         //DrawRectangleRec(dst, RED);
-        DrawTexturePro(tex, src, dst, Vector2Zero(), 0, WHITE);
+        DrawTexturePro(tex, tex_part, display, Vector2Zero(), 0, WHITE);
 
         for (size_t i=0; i< stack.cursor/2; i++) {
             Rectangle r = hull(
