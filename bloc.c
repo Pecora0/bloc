@@ -132,19 +132,17 @@ int main(int argc, const char **argv) {
         };
         Rectangle display = fit(screen, tex_part.width / tex_part.height);
 
-        Matrix screen_to_normal = MatrixMultiply(
-                MatrixInvert(rectangle_to_matrix(tex_rec)),
-                MatrixMultiply(
-                    rectangle_to_matrix(tex_part),
-                    MatrixInvert(rectangle_to_matrix(display))
-                    )
+        Matrix screen_to_tex = MatrixMultiply(
+                MatrixInvert(rectangle_to_matrix(display)),
+                rectangle_to_matrix(tex_part)
                 );
-        Matrix normal_to_screen = MatrixInvert(screen_to_normal);
+        Matrix tex_to_screen = MatrixInvert(screen_to_tex);
 
-        Vector2 mouse_view = Vector2Transform(GetMousePosition(), screen_to_normal);
+        Vector2 mouse_screen = GetMousePosition();
+        Vector2 mouse_tex    = Vector2Transform(mouse_screen, screen_to_tex);
 
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-            push_point(mouse_view);
+            push_point(mouse_tex);
         }
         if (IsKeyPressed(KEY_U)) {
             if (stack.cursor > 0) {
@@ -192,21 +190,25 @@ int main(int argc, const char **argv) {
 
         for (size_t i=0; i< stack.cursor/2; i++) {
             Rectangle r = hull(
-                    Vector2Transform(stack.items[2*i+0], normal_to_screen),
-                    Vector2Transform(stack.items[2*i+1], normal_to_screen)
+                    Vector2Transform(stack.items[2*i+0], tex_to_screen),
+                    Vector2Transform(stack.items[2*i+1], tex_to_screen)
                     );
             DrawRectangleRec(r, BLOC_COLOR);
         }
 
         if (stack.cursor % 2 == 1) {
             Rectangle preview = hull(
-                    Vector2Transform(stack.items[stack.cursor-1], normal_to_screen),
-                    Vector2Transform(mouse_view, normal_to_screen)
+                    Vector2Transform(stack.items[stack.cursor-1], tex_to_screen),
+                    mouse_screen
                     );
             DrawRectangleRec(preview, ColorAlpha(BLOC_COLOR, 0.7));
         }
 
-        DrawText(TextFormat("%.2f %.2f", mouse_view.x, mouse_view.y), 10, 10, 20, GREEN);
+        {
+            int line = 10;
+            DrawText(TextFormat("Mouse screen: %.2f %.2f", mouse_screen.x, mouse_screen.y), 10, line, 20, GREEN); line+=30;
+            DrawText(TextFormat("Mouse tex   : %.2f %.2f", mouse_tex.x, mouse_tex.y),       10, line, 20, GREEN); line+=30;
+        }
 
         EndDrawing();
     }
@@ -214,15 +216,8 @@ int main(int argc, const char **argv) {
     CloseWindow();
 
     if (stack.cursor >= 2) {
-        Rectangle src = {
-            .x = 0,
-            .y = 0,
-            .width = img.width,
-            .height = img.height,
-        };
-        Matrix normal_to_src = rectangle_to_matrix(src);
         for (size_t i=0; i<stack.cursor/2; i++) {
-            Rectangle rec = hull(Vector2Transform(stack.items[2*i], normal_to_src), Vector2Transform(stack.items[2*i+1], normal_to_src));
+            Rectangle rec = hull(stack.items[2*i], stack.items[2*i+1]);
             ImageDrawRectangleRec(&img, rec, BLOC_COLOR);
         }
 
