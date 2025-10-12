@@ -8,6 +8,7 @@
 #include <raymath.h>
 
 #define MIN(x, y) ((x) <= (y) ? (x) : (y))
+#define MAX(x, y) ((x) >= (y) ? (x) : (y))
 #define ABS(x) ((x) >= 0 ? (x) : -(x))
 
 #define BACKGROUND_COLOR DARKGRAY
@@ -35,6 +36,23 @@ Rectangle fit(Rectangle outer, float aspect) {
     result.x = (outer.width - result.width) / 2   + outer.x;
     result.y = (outer.height - result.height) / 2 + outer.y;
 
+    return result;
+}
+
+Rectangle intersect(Rectangle r, Rectangle s) {
+    if (r.width  < 0) UNIMPLEMENTED("intersect");
+    if (r.height < 0) UNIMPLEMENTED("intersect");
+    if (s.width  < 0) UNIMPLEMENTED("intersect");
+    if (s.height < 0) UNIMPLEMENTED("intersect");
+
+    float x = fmax(r.x, s.x);
+    float y = fmax(r.y, s.y);
+    Rectangle result = {
+        .x = x,
+        .y = y,
+        .width  = fmin(r.x + r.width , s.x + s.width)  - x,
+        .height = fmin(r.y + r.height, s.y + s.height) - y,
+    };
     return result;
 }
 
@@ -161,15 +179,18 @@ int main(int argc, const char **argv) {
         // Zoom
         {
             float wheel = GetMouseWheelMove();
-            if (wheel > 0) {
-                tex_part.width  *= 1 - ZOOM_STEP;
-                tex_part.height *= 1 - ZOOM_STEP;
-            } else if (wheel < 0) {
-                tex_part.width  *= 1 + ZOOM_STEP;
-                tex_part.height *= 1 + ZOOM_STEP;
-                tex_part.width = MIN(tex_part.width, tex.width);
-                tex_part.height = MIN(tex_part.height, tex.height);
+            float scaler = 1 - ZOOM_STEP*wheel;
+
+            {
+                // math that makes sure that width and height are scaled by scaler and that mouse_tex stays constant
+                Vector2 help = Vector2Transform(mouse_screen, MatrixInvert(rectangle_to_matrix(display)));
+                tex_part.x += (1 - scaler) * tex_part.width  * help.x;
+                tex_part.y += (1 - scaler) * tex_part.height * help.y;
+                tex_part.width  *= scaler;
+                tex_part.height *= scaler;
             }
+
+            tex_part = intersect(tex_rec, tex_part);
         }
 
         {
