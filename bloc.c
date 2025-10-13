@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <string.h>
 
 #include "devutils.h"
 
@@ -109,12 +110,50 @@ void print_usage(const char *program) {
     printf("Usage: %s <IMAGE-FILE>\n", program);
 }
 
-int main(int argc, const char **argv) {
+static const char *input_path;
+static const char *output_path;
+
+void parse_flags(int argc, const char **argv) {
     if (argc < 2) {
         print_usage(argv[0]);
         exit(1);
     }
-    const char *input_path = argv[1];
+    bool found_input = false;
+    bool found_output = false;
+    for (int i=1; i<argc; i++) {
+        if (strcmp(argv[i], "-o") == 0) {
+            if (i == argc-1) {
+                printf("[ERROR] no matching argument found to '-o' flag\n");
+                print_usage(argv[0]);
+                exit(1);
+            }
+            output_path = argv[i+1];
+            i++;
+            found_output = true;
+        } else {
+            input_path = argv[i];
+            found_input = true;
+        }
+    }
+    if (!found_input) {
+        printf("[ERROR] No input file was given\n");
+        print_usage(argv[0]);
+        exit(1);
+    }
+    if (!found_output) {
+        const char *name = GetFileNameWithoutExt(input_path);
+        const char *ext = GetFileExtension(input_path);
+        const char *infix = ".bloc";
+        int n = strlen(name) + strlen(ext) + strlen(infix) + 1;
+        char *result = malloc(n*sizeof(char));
+        int r = sprintf(result, "%s%s%s", name, infix, ext);
+        assert(r >= 0);
+        output_path = result;
+    }
+}
+
+int main(int argc, const char **argv) {
+    parse_flags(argc, argv);
 
     if (!FileExists(input_path)) {
         printf("[ERROR]: file '%s' does not exist\n", input_path);
@@ -242,7 +281,7 @@ int main(int argc, const char **argv) {
             ImageDrawRectangleRec(&img, rec, BLOC_COLOR);
         }
 
-        if (!ExportImage(img, "out.jpg")) {
+        if (!ExportImage(img, output_path)) {
             UNIMPLEMENTED("export failure");
         }
     }
