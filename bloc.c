@@ -103,13 +103,14 @@ void push_point(Vector2 v) {
         stack.capacity = 16;
         stack.cursor = 0;
         stack.count = 0;
-        stack.items = malloc(sizeof(v) * stack.capacity);
+        stack.items = arena_alloc(&global_arena, sizeof(v) * stack.capacity);
     }
     assert(stack.cursor <= stack.count);
     assert(stack.count <= stack.capacity);
     if (stack.cursor == stack.capacity) {
+        size_t old_capacity = stack.capacity;
         stack.capacity *= 2;
-        stack.items = realloc(stack.items, sizeof(v) * stack.capacity);
+        stack.items = arena_realloc(&global_arena, stack.items, sizeof(v) * old_capacity, sizeof(v) * stack.capacity);
         assert(stack.items != NULL);
     }
     assert(stack.cursor < stack.capacity);
@@ -153,11 +154,8 @@ void parse_flags(int argc, const char **argv) {
         const char *input_path = input_paths.items[0];
         const char *name = GetFileNameWithoutExt(input_path);
         const char *ext = GetFileExtension(input_path);
-        const char *infix = ".bloc";
-        int n = strlen(name) + strlen(ext) + strlen(infix) + 1;
-        char *result = malloc(n*sizeof(char));
-        int r = sprintf(result, "%s%s%s", name, infix, ext);
-        assert(r >= 0);
+        char *result = arena_sprintf(&global_arena, "%s.bloc%s", name, ext);
+        assert(result != NULL);
         output_path = result;
     }
 }
@@ -295,6 +293,5 @@ int main(int argc, const char **argv) {
             UNIMPLEMENTED("export failure");
         }
     }
-    if (stack.items != NULL) free(stack.items);
     arena_free(&global_arena);
 }
