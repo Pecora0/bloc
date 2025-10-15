@@ -4,6 +4,8 @@
 #include <string.h>
 
 #include "devutils.h"
+#define ARENA_IMPLEMENTATION
+#include "arena.h"
 
 #include <raylib.h>
 #include <raymath.h>
@@ -15,6 +17,28 @@
 #define BACKGROUND_COLOR DARKGRAY
 #define BLOC_COLOR BLACK
 #define ZOOM_STEP 0.1
+
+typedef struct {
+    const char **items;
+    size_t capacity;
+    size_t count;
+} String_DA;
+
+struct {
+    Vector2 *items;
+    size_t cursor;
+    size_t count;
+    size_t capacity;
+} stack = {
+    .items = NULL,
+    .cursor = 0,
+    .count = 0,
+    .capacity = 0,
+};
+
+Arena global_arena = {0};
+static String_DA input_paths = {0};
+static const char *output_path;
 
 Rectangle hull(Vector2 a, Vector2 b) {
     Rectangle result = {
@@ -74,18 +98,6 @@ Matrix rectangle_to_matrix(Rectangle r) {
     return result;
 }
 
-struct {
-    Vector2 *items;
-    size_t cursor;
-    size_t count;
-    size_t capacity;
-} stack = {
-    .items = NULL,
-    .cursor = 0,
-    .count = 0,
-    .capacity = 0,
-};
-
 void push_point(Vector2 v) {
     if (stack.capacity == 0) {
         stack.capacity = 16;
@@ -110,15 +122,12 @@ void print_usage(const char *program) {
     printf("Usage: %s <IMAGE-FILE>\n", program);
 }
 
-static const char *input_path;
-static const char *output_path;
-
+// TODO: edit multiple images one after the other
 void parse_flags(int argc, const char **argv) {
     if (argc < 2) {
         print_usage(argv[0]);
         exit(1);
     }
-    bool found_input = false;
     bool found_output = false;
     for (int i=1; i<argc; i++) {
         if (strcmp(argv[i], "-o") == 0) {
@@ -131,16 +140,17 @@ void parse_flags(int argc, const char **argv) {
             i++;
             found_output = true;
         } else {
-            input_path = argv[i];
-            found_input = true;
+            arena_da_append(&global_arena, &input_paths, argv[i]);
         }
     }
-    if (!found_input) {
+    if (input_paths.count == 0) {
         printf("[ERROR] No input file was given\n");
         print_usage(argv[0]);
         exit(1);
     }
+    if (input_paths.count > 1) UNIMPLEMENTED("parse_flags");
     if (!found_output) {
+        const char *input_path = input_paths.items[0];
         const char *name = GetFileNameWithoutExt(input_path);
         const char *ext = GetFileExtension(input_path);
         const char *infix = ".bloc";
@@ -155,14 +165,14 @@ void parse_flags(int argc, const char **argv) {
 int main(int argc, const char **argv) {
     parse_flags(argc, argv);
 
-    if (!FileExists(input_path)) {
-        printf("[ERROR]: file '%s' does not exist\n", input_path);
+    if (!FileExists(input_paths.items[0])) {
+        printf("[ERROR]: file '%s' does not exist\n", input_paths.items[0]);
         exit(1);
     }
 
-    Image img = LoadImage(input_path);
+    Image img = LoadImage(input_paths.items[0]);
     if (img.width <= 0 || img.height <= 0) {
-        printf("[ERROR]: could not load image '%s'\n", input_path);
+        printf("[ERROR]: could not load image '%s'\n", input_paths.items[0]);
         exit(1);
     }
 
@@ -211,12 +221,10 @@ int main(int argc, const char **argv) {
                 stack.cursor++;
             }
         }
-        if (IsKeyPressed(KEY_S)) {
-            UNIMPLEMENTED("save");
-        }
 
         // Zoom
         {
+            // TODO: make it possible to zoom by keyboard presses (+/-)
             float wheel = GetMouseWheelMove();
             float scaler = 1 - ZOOM_STEP*wheel;
 
@@ -231,6 +239,8 @@ int main(int argc, const char **argv) {
 
             tex_part = intersect(tex_rec, tex_part);
         }
+
+        // TODO: pan around when zoomed in
 
         {
             int key = GetKeyPressed();
@@ -286,4 +296,5 @@ int main(int argc, const char **argv) {
         }
     }
     if (stack.items != NULL) free(stack.items);
+    arena_free(&global_arena);
 }

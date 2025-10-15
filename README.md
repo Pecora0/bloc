@@ -3,6 +3,12 @@
 Simple tool to add single color rectangles to images quickly.
 Can be used to hide faces or other recognizable information.
 
+<img src="./examples/waschbaer.jpg">
+<img src="./examples/waschbaer-demo.jpg">
+
+It uses [raylib](https://www.raylib.com/) for display
+and [arena.h](https://github.com/tsoding/arena) for memory management.
+
 ## Quickstart
 
 ```console
