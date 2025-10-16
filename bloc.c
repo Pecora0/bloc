@@ -138,7 +138,7 @@ void print_usage(const char *program) {
     printf("Usage: %s <IMAGE-FILE>\n", program);
 }
 
-void parse_flags(int argc, const char **argv) {
+void parse_commands(int argc, const char **argv) {
     if (argc < 2) {
         print_usage(argv[0]);
         exit(1);
@@ -195,7 +195,7 @@ void edit_image(Image *img) {
 }
 
 int main(int argc, const char **argv) {
-    parse_flags(argc, argv);
+    parse_commands(argc, argv);
 
     InitWindow(800, 600, "Bloc");
     SetWindowState(FLAG_WINDOW_RESIZABLE);
