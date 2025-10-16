@@ -37,8 +37,8 @@ struct {
 };
 
 Arena global_arena = {0};
-static String_DA input_paths = {0};
-static const char *output_path;
+static String_DA input_paths  = {0};
+static String_DA output_paths = {0};
 
 Rectangle hull(Vector2 a, Vector2 b) {
     Rectangle result = {
@@ -81,6 +81,16 @@ Rectangle intersect(Rectangle r, Rectangle s) {
     return result;
 }
 
+Rectangle texture_rectangle(Texture t) {
+    Rectangle result = {
+        .x = 0,
+        .y = 0,
+        .width = t.width,
+        .height = t.height,
+    };
+    return result;
+}
+
 // NOTE: it makes sense to view a rectangle r as the affine transformation
 // (x , y) -> (r.width * x + r.x , r.height * y + r.y)
 // represented by the matrix
@@ -119,17 +129,20 @@ void push_point(Vector2 v) {
     stack.count = stack.cursor;
 }
 
+void reset_stack() {
+    stack.cursor = 0;
+    stack.count = 0;
+}
+
 void print_usage(const char *program) {
     printf("Usage: %s <IMAGE-FILE>\n", program);
 }
 
-// TODO: edit multiple images one after the other
 void parse_flags(int argc, const char **argv) {
     if (argc < 2) {
         print_usage(argv[0]);
         exit(1);
     }
-    bool found_output = false;
     for (int i=1; i<argc; i++) {
         if (strcmp(argv[i], "-o") == 0) {
             if (i == argc-1) {
@@ -137,9 +150,8 @@ void parse_flags(int argc, const char **argv) {
                 print_usage(argv[0]);
                 exit(1);
             }
-            output_path = argv[i+1];
+            arena_da_append(&global_arena, &output_paths, argv[i+1]);
             i++;
-            found_output = true;
         } else {
             arena_da_append(&global_arena, &input_paths, argv[i]);
         }
@@ -149,46 +161,54 @@ void parse_flags(int argc, const char **argv) {
         print_usage(argv[0]);
         exit(1);
     }
-    if (input_paths.count > 1) UNIMPLEMENTED("parse_flags");
-    if (!found_output) {
-        const char *input_path = input_paths.items[0];
+    if (output_paths.count > input_paths.count) UNIMPLEMENTED("parse_flags");
+    // fill output_paths with default values
+    for (size_t i=output_paths.count; i<input_paths.count; i++) {
+        const char *input_path = input_paths.items[i];
         const char *name = GetFileNameWithoutExt(input_path);
         const char *ext = GetFileExtension(input_path);
         char *result = arena_sprintf(&global_arena, "%s.bloc%s", name, ext);
         assert(result != NULL);
-        output_path = result;
+        arena_da_append(&global_arena, &output_paths, result);
+    }
+}
+
+Image load_image_from_index(size_t index) {
+    if (!FileExists(input_paths.items[index])) {
+        printf("[ERROR]: file '%s' does not exist\n", input_paths.items[0]);
+        exit(1);
+    }
+
+    Image img = LoadImage(input_paths.items[index]);
+    if (img.width <= 0 || img.height <= 0) {
+        printf("[ERROR]: could not load image '%s'\n", input_paths.items[0]);
+        exit(1);
+    }
+    return img;
+}
+
+void edit_image(Image *img) {
+    for (size_t i=0; i<stack.cursor/2; i++) {
+        Rectangle rec = hull(stack.items[2*i], stack.items[2*i+1]);
+        ImageDrawRectangleRec(img, rec, BLOC_COLOR);
     }
 }
 
 int main(int argc, const char **argv) {
     parse_flags(argc, argv);
 
-    if (!FileExists(input_paths.items[0])) {
-        printf("[ERROR]: file '%s' does not exist\n", input_paths.items[0]);
-        exit(1);
-    }
-
-    Image img = LoadImage(input_paths.items[0]);
-    if (img.width <= 0 || img.height <= 0) {
-        printf("[ERROR]: could not load image '%s'\n", input_paths.items[0]);
-        exit(1);
-    }
-
     InitWindow(800, 600, "Bloc");
     SetWindowState(FLAG_WINDOW_RESIZABLE);
     SetTargetFPS(60);
 
+    size_t index = 0;
+    Image img = load_image_from_index(index);
     Texture tex = LoadTextureFromImage(img);
+    Rectangle tex_part = texture_rectangle(tex);
 
-    Rectangle tex_rec = {
-        .x = 0,
-        .y = 0,
-        .width = tex.width,
-        .height = tex.height,
-    };
-    Rectangle tex_part = tex_rec;
-
-    while (!WindowShouldClose()) {
+    bool exit_window = false;
+    while (!exit_window) {
+        exit_window |= WindowShouldClose();
         Rectangle screen = {
             .x = 0,
             .y = 0,
@@ -219,6 +239,26 @@ int main(int argc, const char **argv) {
                 stack.cursor++;
             }
         }
+        if (IsKeyPressed(KEY_ENTER)) {
+            if (stack.cursor >= 2) {
+                edit_image(&img);
+
+                if (!ExportImage(img, output_paths.items[index])) {
+                    UNIMPLEMENTED("export failure");
+                }
+            }
+            UnloadTexture(tex);
+            UnloadImage(img);
+            reset_stack();
+            index++;
+            if (index < input_paths.count) {
+                img = load_image_from_index(index);
+                tex = LoadTextureFromImage(img);
+                tex_part = texture_rectangle(tex);
+            } else {
+                exit_window = true;
+            }
+        }
 
         // Zoom
         {
@@ -235,21 +275,10 @@ int main(int argc, const char **argv) {
                 tex_part.height *= scaler;
             }
 
-            tex_part = intersect(tex_rec, tex_part);
+            tex_part = intersect(texture_rectangle(tex), tex_part);
         }
 
-        // TODO: pan around when zoomed in
-
-        {
-            int key = GetKeyPressed();
-            if (key != 0) {
-                printf("[INFO] Keycode: %d (%c)\n", key, key);
-            }
-            int unicode = GetCharPressed();
-            if (unicode != 0) {
-                printf("[INFO] Char: %d (%c)\n", unicode, unicode);
-            }
-        }
+        // TODO: option to pan around when zoomed in
 
         BeginDrawing();
         ClearBackground(BACKGROUND_COLOR);
@@ -283,13 +312,10 @@ int main(int argc, const char **argv) {
 
     CloseWindow();
 
-    if (stack.cursor >= 2) {
-        for (size_t i=0; i<stack.cursor/2; i++) {
-            Rectangle rec = hull(stack.items[2*i], stack.items[2*i+1]);
-            ImageDrawRectangleRec(&img, rec, BLOC_COLOR);
-        }
+    if (index < input_paths.count && stack.cursor >= 2) {
+        edit_image(&img);
 
-        if (!ExportImage(img, output_path)) {
+        if (!ExportImage(img, output_paths.items[index])) {
             UNIMPLEMENTED("export failure");
         }
     }
