@@ -15,7 +15,7 @@
 #define ABS(x) ((x) >= 0 ? (x) : -(x))
 
 #define BACKGROUND_COLOR DARKGRAY
-#define BLOC_COLOR BLACK
+#define DEFAULT_BLOCK_COLOR BLACK
 #define ZOOM_STEP 0.1
 
 typedef struct {
@@ -39,6 +39,7 @@ struct {
 Arena global_arena = {0};
 static String_DA input_paths  = {0};
 static String_DA output_paths = {0};
+Color block_color = DEFAULT_BLOCK_COLOR;
 
 Rectangle hull(Vector2 a, Vector2 b) {
     Rectangle result = {
@@ -138,6 +139,20 @@ void print_usage(const char *program) {
     printf("Usage: %s <IMAGE-FILE>\n", program);
 }
 
+Color parse_color(const char *str) {
+    if (strlen(str) != 6) UNIMPLEMENTED("parse_color");
+    long code = strtol(str, NULL, 16);
+    assert(0x0 <= code);
+    assert(code <= 0xFFFFFF);
+    Color result = {
+        .r = (code >> 2*8) & 0xFF,
+        .g = (code >> 1*8) & 0xFF,
+        .b = (code >> 0*8) & 0xFF,
+        .a = 0xFF,
+    };
+    return result;
+}
+
 void parse_commands(int argc, const char **argv) {
     if (argc < 2) {
         print_usage(argv[0]);
@@ -151,6 +166,14 @@ void parse_commands(int argc, const char **argv) {
                 exit(1);
             }
             arena_da_append(&global_arena, &output_paths, argv[i+1]);
+            i++;
+        } else if (strcmp(argv[i], "-c") == 0) {
+            if (i == argc-1) {
+                printf("[ERROR] no matching argument found to '-i' flag\n");
+                print_usage(argv[0]);
+                exit(1);
+            }
+            block_color = parse_color(argv[i+1]);
             i++;
         } else {
             arena_da_append(&global_arena, &input_paths, argv[i]);
@@ -190,7 +213,7 @@ Image load_image_from_index(size_t index) {
 void edit_image(Image *img) {
     for (size_t i=0; i<stack.cursor/2; i++) {
         Rectangle rec = hull(stack.items[2*i], stack.items[2*i+1]);
-        ImageDrawRectangleRec(img, rec, BLOC_COLOR);
+        ImageDrawRectangleRec(img, rec, block_color);
     }
 }
 
@@ -290,7 +313,7 @@ int main(int argc, const char **argv) {
                     Vector2Transform(stack.items[2*i+0], tex_to_screen),
                     Vector2Transform(stack.items[2*i+1], tex_to_screen)
                     );
-            DrawRectangleRec(r, BLOC_COLOR);
+            DrawRectangleRec(r, block_color);
         }
 
         if (stack.cursor % 2 == 1) {
@@ -298,7 +321,7 @@ int main(int argc, const char **argv) {
                     Vector2Transform(stack.items[stack.cursor-1], tex_to_screen),
                     mouse_screen
                     );
-            DrawRectangleRec(preview, ColorAlpha(BLOC_COLOR, 0.7));
+            DrawRectangleRec(preview, ColorAlpha(block_color, 0.7));
         }
 
         {
