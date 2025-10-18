@@ -7,6 +7,7 @@
 #define ARENA_IMPLEMENTATION
 #include "arena.h"
 
+// TODO: raylib feels like bloat for this, consider migration to glfw or rgfw
 #include <raylib.h>
 #include <raymath.h>
 
@@ -17,6 +18,7 @@
 #define BACKGROUND_COLOR DARKGRAY
 #define DEFAULT_BLOCK_COLOR BLACK
 #define ZOOM_STEP 0.1
+#define PAN_STEP 0.01
 
 typedef struct {
     const char **items;
@@ -283,7 +285,8 @@ int main(int argc, const char **argv) {
             }
         }
 
-        // Zoom
+        // zoom
+        // TODO: zoom behaves weird, e.g. we should fill the screen when we zoom in
         {
             // TODO: make it possible to zoom by keyboard presses (+/-)
             float wheel = GetMouseWheelMove();
@@ -301,7 +304,31 @@ int main(int argc, const char **argv) {
             tex_part = intersect(texture_rectangle(tex), tex_part);
         }
 
-        // TODO: option to pan around when zoomed in
+        // pan
+        if (IsKeyDown(KEY_J)) {
+            float d = PAN_STEP * tex_part.height;
+            tex_part.y += d;
+            float border = texture_rectangle(tex).y + texture_rectangle(tex).height - tex_part.height;
+            tex_part.y = MIN(tex_part.y, border);
+        }
+        if (IsKeyDown(KEY_K)) {
+            float d = PAN_STEP * tex_part.height;
+            tex_part.y -= d;
+            float border = texture_rectangle(tex).y;
+            tex_part.y = MAX(tex_part.y, border);
+        }
+        if (IsKeyDown(KEY_H)) {
+            float d = PAN_STEP * tex_part.width;
+            tex_part.x -= d;
+            float border = texture_rectangle(tex).x;
+            tex_part.x = MAX(tex_part.x, border);
+        }
+        if (IsKeyDown(KEY_L)) {
+            float d = PAN_STEP * tex_part.width;
+            tex_part.x += d;
+            float border = texture_rectangle(tex).x + texture_rectangle(tex).width - tex_part.width;
+            tex_part.x = MIN(tex_part.x, border);
+        }
 
         BeginDrawing();
         ClearBackground(BACKGROUND_COLOR);
