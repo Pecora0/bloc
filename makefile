@@ -1,2 +1,2 @@
-bloc: bloc.c devutils.h arena.h
-	gcc -Wall -Wextra -o bloc bloc.c -lraylib -lm
+bloc: bloc.c thirdparty/devutils.h thirdparty/arena.h
+	gcc -Wall -Wextra -I./thirdparty -o bloc bloc.c -lraylib -lm

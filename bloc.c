@@ -26,17 +26,21 @@ typedef struct {
     size_t count;
 } String_DA;
 
-struct {
+typedef struct {
     Vector2 *items;
     size_t cursor;
     size_t count;
     size_t capacity;
-} stack = {
-    .items = NULL,
-    .cursor = 0,
-    .count = 0,
-    .capacity = 0,
-};
+} Vector_Stack;
+
+typedef struct {
+    Image img;
+    Texture tex;
+    // TODO: 'part' has to much information. We just need a point and a zoom level, 
+    // the aspect ratio should be determined by the screen dimensions
+    Rectangle part;
+    Vector_Stack stack;
+} Draw_Context;
 
 Arena global_arena = {0};
 static String_DA input_paths  = {0};
@@ -111,30 +115,25 @@ Matrix rectangle_to_matrix(Rectangle r) {
     return result;
 }
 
-void push_point(Vector2 v) {
-    if (stack.capacity == 0) {
-        stack.capacity = 16;
-        stack.cursor = 0;
-        stack.count = 0;
-        stack.items = arena_alloc(&global_arena, sizeof(v) * stack.capacity);
+void push_point(Vector_Stack *stack, Vector2 v) {
+    if (stack->capacity == 0) {
+        stack->capacity = 16;
+        stack->cursor = 0;
+        stack->count = 0;
+        stack->items = arena_alloc(&global_arena, sizeof(v) * stack->capacity);
     }
-    assert(stack.cursor <= stack.count);
-    assert(stack.count <= stack.capacity);
-    if (stack.cursor == stack.capacity) {
-        size_t old_capacity = stack.capacity;
-        stack.capacity *= 2;
-        stack.items = arena_realloc(&global_arena, stack.items, sizeof(v) * old_capacity, sizeof(v) * stack.capacity);
-        assert(stack.items != NULL);
+    assert(stack->cursor <= stack->count);
+    assert(stack->count <= stack->capacity);
+    if (stack->cursor == stack->capacity) {
+        size_t old_capacity = stack->capacity;
+        stack->capacity *= 2;
+        stack->items = arena_realloc(&global_arena, stack->items, sizeof(v) * old_capacity, sizeof(v) * stack->capacity);
+        assert(stack->items != NULL);
     }
-    assert(stack.cursor < stack.capacity);
-    stack.items[stack.cursor] = v;
-    stack.cursor++;
-    stack.count = stack.cursor;
-}
-
-void reset_stack() {
-    stack.cursor = 0;
-    stack.count = 0;
+    assert(stack->cursor < stack->capacity);
+    stack->items[stack->cursor] = v;
+    stack->cursor++;
+    stack->count = stack->cursor;
 }
 
 void print_usage(const char *program) {
@@ -212,11 +211,161 @@ Image load_image_from_index(size_t index) {
     return img;
 }
 
-void edit_image(Image *img) {
+void edit_image(Vector_Stack stack, Image *img) {
     for (size_t i=0; i<stack.cursor/2; i++) {
         Rectangle rec = hull(stack.items[2*i], stack.items[2*i+1]);
         ImageDrawRectangleRec(img, rec, block_color);
     }
+}
+
+void draw_context_load(Draw_Context *ctx, Image img) {
+    Texture t = LoadTextureFromImage(img);
+    ctx->img = img;
+    ctx->tex = t;
+    ctx->part = (Rectangle) {
+        .x = 0, .y = 0,
+        .width = t.width,
+        .height = t.height,
+    };
+}
+
+Draw_Context draw_context_new(Image img) {
+    Draw_Context result = {
+        .stack = {0},
+    };
+    draw_context_load(&result, img);
+    return result;
+}
+
+void draw_context_reset(Draw_Context *ctx) {
+    UnloadTexture(ctx->tex);
+    UnloadImage(ctx->img);
+    ctx->stack.count = 0;
+    ctx->stack.cursor = 0;
+}
+
+void draw(Draw_Context *ctx) {
+    Rectangle screen = {
+        .x = 0,
+        .y = 0,
+        .width = GetScreenWidth(),
+        .height = GetScreenHeight(),
+    };
+    Rectangle display = fit(screen, ctx->part.width / ctx->part.height);
+    Matrix screen_to_tex = MatrixMultiply(
+            MatrixInvert(rectangle_to_matrix(display)),
+            rectangle_to_matrix(ctx->part)
+            );
+    Matrix tex_to_screen = MatrixInvert(screen_to_tex);
+
+    Vector2 mouse_screen = GetMousePosition();
+
+    DrawTexturePro(ctx->tex, ctx->part, display, Vector2Zero(), 0, WHITE);
+
+    for (size_t i=0; i< ctx->stack.cursor/2; i++) {
+        Rectangle r = hull(
+                Vector2Transform(ctx->stack.items[2*i+0], tex_to_screen),
+                Vector2Transform(ctx->stack.items[2*i+1], tex_to_screen)
+                );
+        DrawRectangleRec(r, block_color);
+    }
+
+    if (ctx->stack.cursor % 2 == 1) {
+        Rectangle preview = hull(
+                Vector2Transform(ctx->stack.items[ctx->stack.cursor-1], tex_to_screen),
+                mouse_screen
+                );
+        DrawRectangleRec(preview, ColorAlpha(block_color, 0.7));
+    }
+}
+
+void undo(Draw_Context *ctx) {
+    if (ctx->stack.cursor > 0) {
+        ctx->stack.cursor--;
+    }
+}
+
+void redo(Draw_Context *ctx) {
+    if (ctx->stack.cursor < ctx->stack.count) {
+        ctx->stack.cursor++;
+    }
+}
+
+void click(Draw_Context *ctx) {
+    Rectangle screen = {
+        .x = 0,
+        .y = 0,
+        .width = GetScreenWidth(),
+        .height = GetScreenHeight(),
+    };
+    Rectangle display = fit(screen, ctx->part.width / ctx->part.height);
+
+    Matrix screen_to_tex = MatrixMultiply(
+            MatrixInvert(rectangle_to_matrix(display)),
+            rectangle_to_matrix(ctx->part)
+            );
+    Vector2 mouse_screen = GetMousePosition();
+    Vector2 mouse_tex    = Vector2Transform(mouse_screen, screen_to_tex);
+
+    push_point(&ctx->stack, mouse_tex);
+}
+
+void pan_down(Draw_Context *ctx) {
+    float d = PAN_STEP * ctx->part.height;
+    ctx->part.y += d;
+    float border = texture_rectangle(ctx->tex).y + texture_rectangle(ctx->tex).height - ctx->part.height;
+    ctx->part.y = MIN(ctx->part.y, border);
+}
+
+void pan_up(Draw_Context *ctx) {
+    float d = PAN_STEP * ctx->part.height;
+    ctx->part.y -= d;
+    float border = texture_rectangle(ctx->tex).y;
+    ctx->part.y = MAX(ctx->part.y, border);
+}
+
+void pan_left(Draw_Context *ctx) {
+    float d = PAN_STEP * ctx->part.width;
+    ctx->part.x -= d;
+    float border = texture_rectangle(ctx->tex).x;
+    ctx->part.x = MAX(ctx->part.x, border);
+}
+
+void pan_right(Draw_Context *ctx) {
+    float d = PAN_STEP * ctx->part.width;
+    ctx->part.x += d;
+    float border = texture_rectangle(ctx->tex).x + texture_rectangle(ctx->tex).width - ctx->part.width;
+    ctx->part.x = MIN(ctx->part.x, border);
+}
+
+void export(Draw_Context *ctx, const char *path) {
+    edit_image(ctx->stack, &ctx->img);
+
+    if (!ExportImage(ctx->img, path)) {
+        UNIMPLEMENTED("export");
+    }
+}
+
+// TODO: this behaves weirdly, we should change the aspect ratio when zooming in to fit the screen better
+void zoom(Draw_Context *ctx, float steps) {
+    float scaler = 1 - ZOOM_STEP*steps;
+    Rectangle screen = {
+        .x = 0,
+        .y = 0,
+        .width = GetScreenWidth(),
+        .height = GetScreenHeight(),
+    };
+    Rectangle display = fit(screen, ctx->part.width / ctx->part.height);
+    Vector2 mouse_screen = GetMousePosition();
+
+    // math that makes sure that width and height are scaled by scaler and that mouse_tex stays constant
+    Vector2 help = Vector2Transform(mouse_screen, MatrixInvert(rectangle_to_matrix(display)));
+    ctx->part.x += (1 - scaler) * ctx->part.width  * help.x;
+    ctx->part.y += (1 - scaler) * ctx->part.height * help.y;
+    ctx->part.width  *= scaler;
+    ctx->part.height *= scaler;
+
+    ctx->part = intersect(texture_rectangle(ctx->tex), ctx->part);
 }
 
 int main(int argc, const char **argv) {
@@ -227,147 +376,69 @@ int main(int argc, const char **argv) {
     SetTargetFPS(60);
 
     size_t index = 0;
-    Image img = load_image_from_index(index);
-    Texture tex = LoadTextureFromImage(img);
-    Rectangle tex_part = texture_rectangle(tex);
+    Draw_Context ctx = draw_context_new(load_image_from_index(index));
 
     bool exit_window = false;
     while (!exit_window) {
         exit_window |= WindowShouldClose();
-        Rectangle screen = {
-            .x = 0,
-            .y = 0,
-            .width = GetScreenWidth(),
-            .height = GetScreenHeight(),
-        };
-        Rectangle display = fit(screen, tex_part.width / tex_part.height);
-
-        Matrix screen_to_tex = MatrixMultiply(
-                MatrixInvert(rectangle_to_matrix(display)),
-                rectangle_to_matrix(tex_part)
-                );
-        Matrix tex_to_screen = MatrixInvert(screen_to_tex);
-
-        Vector2 mouse_screen = GetMousePosition();
-        Vector2 mouse_tex    = Vector2Transform(mouse_screen, screen_to_tex);
 
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-            push_point(mouse_tex);
+            click(&ctx);
         }
         if (IsKeyPressed(KEY_U)) {
-            if (stack.cursor > 0) {
-                stack.cursor--;
-            }
+            undo(&ctx);
         }
         if (IsKeyPressed(KEY_R)) {
-            if (stack.cursor < stack.count) {
-                stack.cursor++;
-            }
+            redo(&ctx);
         }
         if (IsKeyPressed(KEY_ENTER)) {
-            if (stack.cursor >= 2) {
-                edit_image(&img);
-
-                if (!ExportImage(img, output_paths.items[index])) {
-                    UNIMPLEMENTED("export failure");
-                }
+            if (ctx.stack.cursor >= 2) {
+                export(&ctx, output_paths.items[index]);
             }
-            UnloadTexture(tex);
-            UnloadImage(img);
-            reset_stack();
+            draw_context_reset(&ctx);
             index++;
             if (index < input_paths.count) {
-                img = load_image_from_index(index);
-                tex = LoadTextureFromImage(img);
-                tex_part = texture_rectangle(tex);
+                Image next = load_image_from_index(index);
+                draw_context_load(&ctx, next);
             } else {
                 exit_window = true;
             }
         }
 
-        // zoom
-        // TODO: zoom behaves weird, e.g. we should fill the screen when we zoom in
-        {
-            // TODO: make it possible to zoom by keyboard presses (+/-)
-            float wheel = GetMouseWheelMove();
-            float scaler = 1 - ZOOM_STEP*wheel;
-
-            {
-                // math that makes sure that width and height are scaled by scaler and that mouse_tex stays constant
-                Vector2 help = Vector2Transform(mouse_screen, MatrixInvert(rectangle_to_matrix(display)));
-                tex_part.x += (1 - scaler) * tex_part.width  * help.x;
-                tex_part.y += (1 - scaler) * tex_part.height * help.y;
-                tex_part.width  *= scaler;
-                tex_part.height *= scaler;
-            }
-
-            tex_part = intersect(texture_rectangle(tex), tex_part);
-        }
+        // TODO: make it possible to zoom by keyboard presses (+/-)
+        zoom(&ctx, GetMouseWheelMove());
 
         // pan
         if (IsKeyDown(KEY_J)) {
-            float d = PAN_STEP * tex_part.height;
-            tex_part.y += d;
-            float border = texture_rectangle(tex).y + texture_rectangle(tex).height - tex_part.height;
-            tex_part.y = MIN(tex_part.y, border);
+            pan_down(&ctx);
         }
         if (IsKeyDown(KEY_K)) {
-            float d = PAN_STEP * tex_part.height;
-            tex_part.y -= d;
-            float border = texture_rectangle(tex).y;
-            tex_part.y = MAX(tex_part.y, border);
+            pan_up(&ctx);
         }
         if (IsKeyDown(KEY_H)) {
-            float d = PAN_STEP * tex_part.width;
-            tex_part.x -= d;
-            float border = texture_rectangle(tex).x;
-            tex_part.x = MAX(tex_part.x, border);
+            pan_left(&ctx);
         }
         if (IsKeyDown(KEY_L)) {
-            float d = PAN_STEP * tex_part.width;
-            tex_part.x += d;
-            float border = texture_rectangle(tex).x + texture_rectangle(tex).width - tex_part.width;
-            tex_part.x = MIN(tex_part.x, border);
+            pan_right(&ctx);
         }
 
         BeginDrawing();
+
         ClearBackground(BACKGROUND_COLOR);
-        //DrawRectangleRec(dst, RED);
-        DrawTexturePro(tex, tex_part, display, Vector2Zero(), 0, WHITE);
-
-        for (size_t i=0; i< stack.cursor/2; i++) {
-            Rectangle r = hull(
-                    Vector2Transform(stack.items[2*i+0], tex_to_screen),
-                    Vector2Transform(stack.items[2*i+1], tex_to_screen)
-                    );
-            DrawRectangleRec(r, block_color);
-        }
-
-        if (stack.cursor % 2 == 1) {
-            Rectangle preview = hull(
-                    Vector2Transform(stack.items[stack.cursor-1], tex_to_screen),
-                    mouse_screen
-                    );
-            DrawRectangleRec(preview, ColorAlpha(block_color, 0.7));
-        }
-
-        {
-            int line = 10;
-            DrawText(TextFormat("Mouse screen: %.2f %.2f", mouse_screen.x, mouse_screen.y), 10, line, 20, GREEN); line+=30;
-            DrawText(TextFormat("Mouse tex   : %.2f %.2f", mouse_tex.x, mouse_tex.y),       10, line, 20, GREEN); line+=30;
-        }
+        draw(&ctx);
 
         EndDrawing();
     }
 
+    if (index < input_paths.count) {
+        // if we did not edit all given images export the current one anyways
+        if (ctx.stack.cursor >= 2) {
+            export(&ctx, output_paths.items[index]);
+        }
+        draw_context_reset(&ctx);
+    }
+
     CloseWindow();
 
-    if (index < input_paths.count && stack.cursor >= 2) {
-        edit_image(&img);
-
-        if (!ExportImage(img, output_paths.items[index])) {
-            UNIMPLEMENTED("export failure");
-        }
-    }
     arena_free(&global_arena);
 }
