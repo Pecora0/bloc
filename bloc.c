@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <string.h>
+#include <math.h>
 
 #include "devutils.h"
 #define ARENA_IMPLEMENTATION
@@ -9,7 +10,6 @@
 
 // TODO: raylib feels like bloat for this, consider migration to glfw or rgfw
 #include <raylib.h>
-#include <raymath.h>
 
 #define MIN(x, y) ((x) <= (y) ? (x) : (y))
 #define MAX(x, y) ((x) >= (y) ? (x) : (y))
@@ -46,6 +46,14 @@ Arena global_arena = {0};
 static String_DA input_paths  = {0};
 static String_DA output_paths = {0};
 Color block_color = DEFAULT_BLOCK_COLOR;
+
+Vector2 vector2_zero() {
+    Vector2 result = {
+        .x = 0,
+        .y = 0,
+    };
+    return result;
+}
 
 Rectangle hull(Vector2 a, Vector2 b) {
     Rectangle result = {
@@ -105,12 +113,30 @@ Rectangle texture_rectangle(Texture t) {
 // [       0 r.height r.y ]
 // [       0        0   1 ]
 
-Matrix rectangle_to_matrix(Rectangle r) {
-    Matrix result = {
-        .m0 = r.width, .m4 = 0,        .m8  = 0, .m12 = r.x,
-        .m1 =       0, .m5 = r.height, .m9  = 0, .m13 = r.y,
-        .m2 =       0, .m6 = 0,        .m10 = 1, .m14 = 0,
-        .m3 =       0, .m7 = 0,        .m11 = 0, .m15 = 1,
+Vector2 rectangle_transform(Vector2 v, Rectangle r) {
+    Vector2 result = {
+        .x = r.width  * v.x + r.x,
+        .y = r.height * v.y + r.y,
+    };
+    return result;
+}
+
+Rectangle rectangle_multiply(Rectangle a, Rectangle b) {
+    Rectangle result = {
+        .width  = b.width  * a.width,
+        .height = b.height * a.height,
+        .x = b.width  * a.x + b.x,
+        .y = b.height * a.y + b.y,
+    };
+    return result;
+}
+
+Rectangle rectangle_invert(Rectangle a) {
+    Rectangle result = {
+        .width  = 1 / a.width,
+        .height = 1 / a.height,
+        .x = - a.x / a.width,
+        .y = - a.y / a.height,
     };
     return result;
 }
@@ -252,27 +278,27 @@ void draw(Draw_Context *ctx) {
         .height = GetScreenHeight(),
     };
     Rectangle display = fit(screen, ctx->part.width / ctx->part.height);
-    Matrix screen_to_tex = MatrixMultiply(
-            MatrixInvert(rectangle_to_matrix(display)),
-            rectangle_to_matrix(ctx->part)
+    Rectangle screen_to_tex = rectangle_multiply(
+            rectangle_invert(display),
+            ctx->part
             );
-    Matrix tex_to_screen = MatrixInvert(screen_to_tex);
+    Rectangle tex_to_screen = rectangle_invert(screen_to_tex);
 
     Vector2 mouse_screen = GetMousePosition();
 
-    DrawTexturePro(ctx->tex, ctx->part, display, Vector2Zero(), 0, WHITE);
+    DrawTexturePro(ctx->tex, ctx->part, display, vector2_zero(), 0, WHITE);
 
     for (size_t i=0; i< ctx->stack.cursor/2; i++) {
         Rectangle r = hull(
-                Vector2Transform(ctx->stack.items[2*i+0], tex_to_screen),
-                Vector2Transform(ctx->stack.items[2*i+1], tex_to_screen)
+                rectangle_transform(ctx->stack.items[2*i+0], tex_to_screen),
+                rectangle_transform(ctx->stack.items[2*i+1], tex_to_screen)
                 );
         DrawRectangleRec(r, block_color);
     }
 
     if (ctx->stack.cursor % 2 == 1) {
         Rectangle preview = hull(
-                Vector2Transform(ctx->stack.items[ctx->stack.cursor-1], tex_to_screen),
+                rectangle_transform(ctx->stack.items[ctx->stack.cursor-1], tex_to_screen),
                 mouse_screen
                 );
         DrawRectangleRec(preview, ColorAlpha(block_color, 0.7));
@@ -300,12 +326,12 @@ void click(Draw_Context *ctx) {
     };
     Rectangle display = fit(screen, ctx->part.width / ctx->part.height);
 
-    Matrix screen_to_tex = MatrixMultiply(
-            MatrixInvert(rectangle_to_matrix(display)),
-            rectangle_to_matrix(ctx->part)
+    Rectangle screen_to_tex = rectangle_multiply(
+            rectangle_invert(display),
+            ctx->part
             );
     Vector2 mouse_screen = GetMousePosition();
-    Vector2 mouse_tex    = Vector2Transform(mouse_screen, screen_to_tex);
+    Vector2 mouse_tex    = rectangle_transform(mouse_screen, screen_to_tex);
 
     push_point(&ctx->stack, mouse_tex);
 }
@@ -359,7 +385,7 @@ void zoom(Draw_Context *ctx, float steps) {
     Vector2 mouse_screen = GetMousePosition();
 
     // math that makes sure that width and height are scaled by scaler and that mouse_tex stays constant
-    Vector2 help = Vector2Transform(mouse_screen, MatrixInvert(rectangle_to_matrix(display)));
+    Vector2 help = rectangle_transform(mouse_screen, rectangle_invert(display));
     ctx->part.x += (1 - scaler) * ctx->part.width  * help.x;
     ctx->part.y += (1 - scaler) * ctx->part.height * help.y;
     ctx->part.width  *= scaler;
