@@ -6,8 +6,12 @@ Can be used to hide faces or other recognizable information.
 <img src="./examples/waschbaer.jpg">
 <img src="./examples/waschbaer-demo.jpg">
 
-It uses [raylib](https://www.raylib.com/) for display
-and [arena.h](https://github.com/tsoding/arena) for memory management.
+It uses 
+
+- [stb_image.h](https://github.com/nothings/stb/blob/master/stb_image.h) for image reading
+- [stb_image_write.h](https://github.com/nothings/stb/blob/master/stb_image_write.h) for image writing
+- [RGFW](https://github.com/ColleagueRiley/RGFW) for window and event management
+- and [arena.h](https://github.com/tsoding/arena) for memory management
 
 ## Quickstart
 
