@@ -330,7 +330,9 @@ Vector2 get_mouse_position() {
 }
 
 float get_mouse_wheel_move() {
-    UNIMPLEMENTED("get_mouse_wheel_move");
+    float x,y;
+    RGFW_getMouseScroll(&x, &y);
+    return y;
 }
 
 Rectangle window_rectangle() {
@@ -596,7 +598,7 @@ int main(int argc, const char **argv) {
         }
 
         // TODO: make it possible to zoom by keyboard presses (+/-)
-        // zoom(&ctx, get_mouse_wheel_move());
+        zoom(&ctx, get_mouse_wheel_move());
 
         // pan
         if (RGFW_isKeyDown(RGFW_j)) {
