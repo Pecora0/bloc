@@ -227,11 +227,11 @@ const char *get_file_name_without_ext(const char *path) {
 
 const char *get_file_ext(const char *path) {
     const char *name = get_file_name(path);
-    char *fst_point = strchr(name, '.');
-    if (fst_point == NULL) {
+    char *last_point = strrchr(name, '.');
+    if (last_point == NULL) {
         return "";
     }
-    return arena_strdup(&global_arena, fst_point);
+    return arena_strdup(&global_arena, last_point);
 }
 
 void parse_commands(int argc, const char **argv) {
@@ -276,20 +276,6 @@ void parse_commands(int argc, const char **argv) {
         arena_da_append(&global_arena, &output_paths, result);
     }
 }
-
-// Image load_image_from_index(size_t index) {
-//     if (!FileExists(input_paths.items[index])) {
-//         printf("[ERROR]: file '%s' does not exist\n", input_paths.items[0]);
-//         exit(1);
-//     }
-// 
-//     Image img = LoadImage(input_paths.items[index]);
-//     if (img.width <= 0 || img.height <= 0) {
-//         printf("[ERROR]: could not load image '%s'\n", input_paths.items[0]);
-//         exit(1);
-//     }
-//     return img;
-// }
 
 void draw_context_load(Draw_Context *ctx, const char *path) {
     int width, height, channels_in_file;
@@ -530,9 +516,28 @@ void export(Draw_Context *ctx, const char *path) {
         }
     }
 
-    if (!stbi_write_jpg(path, ctx->width, ctx->height, 4, ctx->pixel_data, 50)) {
-        UNIMPLEMENTED("export");
+    const char *ext = get_file_ext(path);
+    if (strcmp(ext, ".png") == 0) {
+        if (!stbi_write_png(path, ctx->width, ctx->height, 4, ctx->pixel_data, 4*ctx->width)) {
+            UNIMPLEMENTED("export");
+        }
+    } else if (strcmp(ext, ".bmp") == 0) {
+        if (!stbi_write_bmp(path, ctx->width, ctx->height, 4, ctx->pixel_data)) {
+            UNIMPLEMENTED("export");
+        }
+    } else if (strcmp(ext, ".tga") == 0) {
+        if (!stbi_write_tga(path, ctx->width, ctx->height, 4, ctx->pixel_data)) {
+            UNIMPLEMENTED("export");
+        }
+    } else if (strcmp(ext, ".jpg") == 0) {
+        if (!stbi_write_jpg(path, ctx->width, ctx->height, 4, ctx->pixel_data, 50)) {
+            UNIMPLEMENTED("export");
+        }
+    } else {
+        printf("[ERROR] did not recognise file extension '%s', can't export image\n", ext);
+        exit(1);
     }
+
     printf("[INFO] wrote file '%s'\n", path);
 }
 
