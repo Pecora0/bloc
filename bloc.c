@@ -3,20 +3,25 @@
 #include <assert.h>
 #include <string.h>
 #include <math.h>
+#include <stdbool.h>
 
 #include "devutils.h"
 #define ARENA_IMPLEMENTATION
 #include "arena.h"
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
 
-// TODO: raylib feels like bloat for this, consider migration to glfw or rgfw
-#include <raylib.h>
+#define RGFW_IMPORT
+#include "RGFW.h"
 
 #define MIN(x, y) ((x) <= (y) ? (x) : (y))
 #define MAX(x, y) ((x) >= (y) ? (x) : (y))
 #define ABS(x) ((x) >= 0 ? (x) : -(x))
 
-#define BACKGROUND_COLOR DARKGRAY
-#define DEFAULT_BLOCK_COLOR BLACK
+#define BACKGROUND_COLOR    ((Color) {80, 80, 80, 255})
+#define DEFAULT_BLOCK_COLOR ((Color) { 0,  0,  0, 255})
 #define ZOOM_STEP 0.1
 #define PAN_STEP 0.01
 
@@ -27,15 +32,31 @@ typedef struct {
 } String_DA;
 
 typedef struct {
+    float x, y;
+} Vector2;
+
+typedef struct {
+    float x, y;
+    float width, height;
+} Rectangle;
+
+typedef struct {
     Vector2 *items;
     size_t cursor;
     size_t count;
     size_t capacity;
 } Vector_Stack;
 
+typedef struct Color {
+    unsigned char r;
+    unsigned char g;
+    unsigned char b;
+    unsigned char a;
+} Color;
+
 typedef struct {
-    Image img;
-    Texture tex;
+    unsigned char *pixel_data;
+    int width, height;
     // TODO: 'part' has to much information. We just need a point and a zoom level, 
     // the aspect ratio should be determined by the screen dimensions
     Rectangle part;
@@ -45,6 +66,10 @@ typedef struct {
 Arena global_arena = {0};
 static String_DA input_paths  = {0};
 static String_DA output_paths = {0};
+RGFW_window *win = NULL;
+RGFW_surface *surface = NULL;
+unsigned char *pixel_buffer;
+size_t pixel_stride;
 Color block_color = DEFAULT_BLOCK_COLOR;
 
 Vector2 vector2_zero() {
@@ -96,12 +121,12 @@ Rectangle intersect(Rectangle r, Rectangle s) {
     return result;
 }
 
-Rectangle texture_rectangle(Texture t) {
+Rectangle texture_rectangle(Draw_Context *ctx) {
     Rectangle result = {
         .x = 0,
         .y = 0,
-        .width = t.width,
-        .height = t.height,
+        .width = ctx->width,
+        .height = ctx->height,
     };
     return result;
 }
@@ -180,6 +205,35 @@ Color parse_color(const char *str) {
     return result;
 }
 
+const char *get_file_name(const char *path) {
+    char *last_slash = strrchr(path, '/');
+    if (last_slash == NULL) {
+        return path;
+    }
+    return arena_strdup(&global_arena, last_slash+1);
+}
+
+const char *get_file_name_without_ext(const char *path) {
+    const char *name = get_file_name(path);
+    char *fst_point = strchr(name, '.');
+    if (fst_point == NULL) {
+        return name;
+    }
+    *fst_point = '\0';
+    const char *result = arena_strdup(&global_arena, name);
+    *fst_point = '.';
+    return result;
+}
+
+const char *get_file_ext(const char *path) {
+    const char *name = get_file_name(path);
+    char *fst_point = strchr(name, '.');
+    if (fst_point == NULL) {
+        return "";
+    }
+    return arena_strdup(&global_arena, fst_point);
+}
+
 void parse_commands(int argc, const char **argv) {
     if (argc < 2) {
         print_usage(argv[0]);
@@ -215,68 +269,147 @@ void parse_commands(int argc, const char **argv) {
     // fill output_paths with default values
     for (size_t i=output_paths.count; i<input_paths.count; i++) {
         const char *input_path = input_paths.items[i];
-        const char *name = GetFileNameWithoutExt(input_path);
-        const char *ext = GetFileExtension(input_path);
+        const char *name = get_file_name_without_ext(input_path);
+        const char *ext = get_file_ext(input_path);
         char *result = arena_sprintf(&global_arena, "%s.bloc%s", name, ext);
         assert(result != NULL);
         arena_da_append(&global_arena, &output_paths, result);
     }
 }
 
-Image load_image_from_index(size_t index) {
-    if (!FileExists(input_paths.items[index])) {
-        printf("[ERROR]: file '%s' does not exist\n", input_paths.items[0]);
-        exit(1);
-    }
+// Image load_image_from_index(size_t index) {
+//     if (!FileExists(input_paths.items[index])) {
+//         printf("[ERROR]: file '%s' does not exist\n", input_paths.items[0]);
+//         exit(1);
+//     }
+// 
+//     Image img = LoadImage(input_paths.items[index]);
+//     if (img.width <= 0 || img.height <= 0) {
+//         printf("[ERROR]: could not load image '%s'\n", input_paths.items[0]);
+//         exit(1);
+//     }
+//     return img;
+// }
 
-    Image img = LoadImage(input_paths.items[index]);
-    if (img.width <= 0 || img.height <= 0) {
-        printf("[ERROR]: could not load image '%s'\n", input_paths.items[0]);
-        exit(1);
-    }
-    return img;
-}
+void draw_context_load(Draw_Context *ctx, const char *path) {
+    int width, height, channels_in_file;
+    ctx->pixel_data = stbi_load(path, &width, &height, &channels_in_file, 4);
+    ctx->width = width;
+    ctx->height = height;
 
-void edit_image(Vector_Stack stack, Image *img) {
-    for (size_t i=0; i<stack.cursor/2; i++) {
-        Rectangle rec = hull(stack.items[2*i], stack.items[2*i+1]);
-        ImageDrawRectangleRec(img, rec, block_color);
-    }
-}
-
-void draw_context_load(Draw_Context *ctx, Image img) {
-    Texture t = LoadTextureFromImage(img);
-    ctx->img = img;
-    ctx->tex = t;
     ctx->part = (Rectangle) {
         .x = 0, .y = 0,
-        .width = t.width,
-        .height = t.height,
+        .width = width,
+        .height = height,
     };
 }
 
-Draw_Context draw_context_new(Image img) {
+Draw_Context draw_context_new(const char *path) {
     Draw_Context result = {
         .stack = {0},
     };
-    draw_context_load(&result, img);
+    draw_context_load(&result, path);
     return result;
 }
 
 void draw_context_reset(Draw_Context *ctx) {
-    UnloadTexture(ctx->tex);
-    UnloadImage(ctx->img);
+    stbi_image_free(ctx->pixel_data);
+    ctx->pixel_data = NULL;
     ctx->stack.count = 0;
     ctx->stack.cursor = 0;
 }
 
-void draw(Draw_Context *ctx) {
-    Rectangle screen = {
+Vector2 get_mouse_position() {
+    int x, y;
+    RGFW_window_getMouse(win, &x, &y);
+    Vector2 result = {
+        .x = x,
+        .y = y,
+    };
+    return result;
+}
+
+float get_mouse_wheel_move() {
+    UNIMPLEMENTED("get_mouse_wheel_move");
+}
+
+Rectangle window_rectangle() {
+    int width, height;
+    RGFW_window_getSize(win, &width, &height);
+    Rectangle result = {
         .x = 0,
         .y = 0,
-        .width = GetScreenWidth(),
-        .height = GetScreenHeight(),
+        .width = width,
+        .height = height,
     };
+    return result;
+}
+
+Color get_color(uint8_t *buffer, size_t pixel_index) {
+    Color result = {
+        .r = buffer[pixel_index * 4 + 0],
+        .g = buffer[pixel_index * 4 + 1],
+        .b = buffer[pixel_index * 4 + 2],
+        .a = buffer[pixel_index * 4 + 3],
+    };
+    return result;
+}
+
+void set_color(uint8_t *buffer, size_t pixel_index, Color c) {
+    buffer[pixel_index * 4 + 0] = c.r;
+    buffer[pixel_index * 4 + 1] = c.g;
+    buffer[pixel_index * 4 + 2] = c.b;
+    buffer[pixel_index * 4 + 3] = c.a;
+}
+
+void clear(Color c) {
+    Rectangle screen = window_rectangle();
+    for (size_t i=0; i<screen.height; i++) {
+        for (size_t j=0; j<screen.width; j++) {
+            set_color(pixel_buffer, i*pixel_stride + j, c);
+        }
+    }
+}
+
+void draw_image(Draw_Context *ctx, Rectangle dst) {
+    dst = intersect(dst, window_rectangle());
+    assert(dst.width >= 0);
+    assert(dst.height >= 0);
+    for (int i=dst.y; i<dst.y+dst.height; i++) {
+        for (int j=dst.x; j<dst.x+dst.width; j++) {
+            Vector2 pos = {(float) j, (float) i};
+            pos = rectangle_transform(pos, rectangle_invert(dst));
+            pos = rectangle_transform(pos, ctx->part);
+
+            int index = floorf(pos.y) * ctx->width + floorf(pos.x);
+            index = MAX(0, index);
+            Color c = get_color(ctx->pixel_data, index);
+            set_color(pixel_buffer, i*pixel_stride + j, c);
+        }
+    }
+}
+
+void draw_rectangle(Rectangle r, Color c) {
+    r = intersect(r, window_rectangle());
+    assert(r.width >= 0);
+    assert(r.height >= 0);
+    for (int i=r.y; i<r.y+r.height; i++) {
+        for (int j=r.x; j<r.x+r.width; j++) {
+            // TODO: proper blending
+            set_color(pixel_buffer, i*pixel_stride + j, c);
+        }
+    }
+}
+
+Color color_alpha(Color c, float a) {
+    a = fmaxf(a, 0);
+    a = fminf(a, 1);
+    c.a = 255.0 * a;
+    return c;
+}
+
+void draw(Draw_Context *ctx) {
+    Rectangle screen = window_rectangle();
     Rectangle display = fit(screen, ctx->part.width / ctx->part.height);
     Rectangle screen_to_tex = rectangle_multiply(
             rectangle_invert(display),
@@ -284,16 +417,16 @@ void draw(Draw_Context *ctx) {
             );
     Rectangle tex_to_screen = rectangle_invert(screen_to_tex);
 
-    Vector2 mouse_screen = GetMousePosition();
+    Vector2 mouse_screen = get_mouse_position();
 
-    DrawTexturePro(ctx->tex, ctx->part, display, vector2_zero(), 0, WHITE);
+    draw_image(ctx, display);
 
     for (size_t i=0; i< ctx->stack.cursor/2; i++) {
         Rectangle r = hull(
                 rectangle_transform(ctx->stack.items[2*i+0], tex_to_screen),
                 rectangle_transform(ctx->stack.items[2*i+1], tex_to_screen)
                 );
-        DrawRectangleRec(r, block_color);
+        draw_rectangle(r, block_color);
     }
 
     if (ctx->stack.cursor % 2 == 1) {
@@ -301,7 +434,7 @@ void draw(Draw_Context *ctx) {
                 rectangle_transform(ctx->stack.items[ctx->stack.cursor-1], tex_to_screen),
                 mouse_screen
                 );
-        DrawRectangleRec(preview, ColorAlpha(block_color, 0.7));
+        draw_rectangle(preview, color_alpha(block_color, 0.7));
     }
 }
 
@@ -318,19 +451,14 @@ void redo(Draw_Context *ctx) {
 }
 
 void click(Draw_Context *ctx) {
-    Rectangle screen = {
-        .x = 0,
-        .y = 0,
-        .width = GetScreenWidth(),
-        .height = GetScreenHeight(),
-    };
+    Rectangle screen = window_rectangle();
     Rectangle display = fit(screen, ctx->part.width / ctx->part.height);
 
     Rectangle screen_to_tex = rectangle_multiply(
             rectangle_invert(display),
             ctx->part
             );
-    Vector2 mouse_screen = GetMousePosition();
+    Vector2 mouse_screen = get_mouse_position();
     Vector2 mouse_tex    = rectangle_transform(mouse_screen, screen_to_tex);
 
     push_point(&ctx->stack, mouse_tex);
@@ -339,50 +467,58 @@ void click(Draw_Context *ctx) {
 void pan_down(Draw_Context *ctx) {
     float d = PAN_STEP * ctx->part.height;
     ctx->part.y += d;
-    float border = texture_rectangle(ctx->tex).y + texture_rectangle(ctx->tex).height - ctx->part.height;
+    float border = texture_rectangle(ctx).y + texture_rectangle(ctx).height - ctx->part.height;
     ctx->part.y = MIN(ctx->part.y, border);
 }
 
 void pan_up(Draw_Context *ctx) {
     float d = PAN_STEP * ctx->part.height;
     ctx->part.y -= d;
-    float border = texture_rectangle(ctx->tex).y;
+    float border = texture_rectangle(ctx).y;
     ctx->part.y = MAX(ctx->part.y, border);
 }
 
 void pan_left(Draw_Context *ctx) {
     float d = PAN_STEP * ctx->part.width;
     ctx->part.x -= d;
-    float border = texture_rectangle(ctx->tex).x;
+    float border = texture_rectangle(ctx).x;
     ctx->part.x = MAX(ctx->part.x, border);
 }
 
 void pan_right(Draw_Context *ctx) {
     float d = PAN_STEP * ctx->part.width;
     ctx->part.x += d;
-    float border = texture_rectangle(ctx->tex).x + texture_rectangle(ctx->tex).width - ctx->part.width;
+    float border = texture_rectangle(ctx).x + texture_rectangle(ctx).width - ctx->part.width;
     ctx->part.x = MIN(ctx->part.x, border);
 }
 
 void export(Draw_Context *ctx, const char *path) {
-    edit_image(ctx->stack, &ctx->img);
+    for (size_t i=0; i<ctx->stack.cursor/2; i++) {
+        Rectangle rec = hull(ctx->stack.items[2*i], ctx->stack.items[2*i+1]);
+        assert(rec.x >= 0);
+        assert(rec.y >= 0);
+        assert(rec.x+rec.width < ctx->width);
+        assert(rec.y+rec.height < ctx->height);
 
-    if (!ExportImage(ctx->img, path)) {
+        for (int i=rec.y; i<rec.y+rec.height; i++) {
+            for (int j=rec.x; j<rec.x+rec.width; j++) {
+                set_color(ctx->pixel_data, i*ctx->width + j, block_color);
+            }
+        }
+    }
+
+    if (!stbi_write_jpg(path, ctx->width, ctx->height, 4, ctx->pixel_data, 50)) {
         UNIMPLEMENTED("export");
     }
+    printf("[INFO] wrote file '%s'\n", path);
 }
 
 // TODO: this behaves weirdly, we should change the aspect ratio when zooming in to fit the screen better
 void zoom(Draw_Context *ctx, float steps) {
     float scaler = 1 - ZOOM_STEP*steps;
-    Rectangle screen = {
-        .x = 0,
-        .y = 0,
-        .width = GetScreenWidth(),
-        .height = GetScreenHeight(),
-    };
+    Rectangle screen = window_rectangle();
     Rectangle display = fit(screen, ctx->part.width / ctx->part.height);
-    Vector2 mouse_screen = GetMousePosition();
+    Vector2 mouse_screen = get_mouse_position();
 
     // math that makes sure that width and height are scaled by scaler and that mouse_tex stays constant
     Vector2 help = rectangle_transform(mouse_screen, rectangle_invert(display));
@@ -391,69 +527,75 @@ void zoom(Draw_Context *ctx, float steps) {
     ctx->part.width  *= scaler;
     ctx->part.height *= scaler;
 
-    ctx->part = intersect(texture_rectangle(ctx->tex), ctx->part);
+    ctx->part = intersect(texture_rectangle(ctx), ctx->part);
 }
 
 int main(int argc, const char **argv) {
     parse_commands(argc, argv);
 
-    InitWindow(800, 600, "Bloc");
-    SetWindowState(FLAG_WINDOW_RESIZABLE);
-    SetTargetFPS(60);
+    win = RGFW_createWindow("Bloc", 0, 0, 800, 600, RGFW_windowCenter);
+	RGFW_window_setExitKey(win, RGFW_escape);
+
+    {
+        RGFW_monitor mon = RGFW_window_getMonitor(win);
+        pixel_buffer = arena_alloc(&global_arena, sizeof(u8) * mon.mode.w * mon.mode.h * 4);
+        pixel_stride = mon.mode.w;
+        surface = RGFW_createSurface(pixel_buffer, mon.mode.w, mon.mode.h, RGFW_formatRGBA8);
+    }
 
     size_t index = 0;
-    Draw_Context ctx = draw_context_new(load_image_from_index(index));
+    Draw_Context ctx = draw_context_new(input_paths.items[index]);
 
     bool exit_window = false;
     while (!exit_window) {
-        exit_window |= WindowShouldClose();
+        RGFW_pollEvents();
+        exit_window |= RGFW_window_shouldClose(win);
 
-        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        if (RGFW_window_isMousePressed(win, RGFW_mouseLeft)) {
             click(&ctx);
         }
-        if (IsKeyPressed(KEY_U)) {
+        if (RGFW_isKeyPressed(RGFW_u)) {
             undo(&ctx);
         }
-        if (IsKeyPressed(KEY_R)) {
+        if (RGFW_isKeyPressed(RGFW_r)) {
             redo(&ctx);
         }
-        if (IsKeyPressed(KEY_ENTER)) {
+        if (RGFW_isKeyPressed(RGFW_enter)) {
             if (ctx.stack.cursor >= 2) {
                 export(&ctx, output_paths.items[index]);
             }
             draw_context_reset(&ctx);
             index++;
             if (index < input_paths.count) {
-                Image next = load_image_from_index(index);
-                draw_context_load(&ctx, next);
+                draw_context_load(&ctx, input_paths.items[index]);
             } else {
                 exit_window = true;
+                break;
             }
         }
 
         // TODO: make it possible to zoom by keyboard presses (+/-)
-        zoom(&ctx, GetMouseWheelMove());
+        // zoom(&ctx, get_mouse_wheel_move());
 
         // pan
-        if (IsKeyDown(KEY_J)) {
+        if (RGFW_isKeyDown(RGFW_j)) {
             pan_down(&ctx);
         }
-        if (IsKeyDown(KEY_K)) {
+        if (RGFW_isKeyDown(RGFW_k)) {
             pan_up(&ctx);
         }
-        if (IsKeyDown(KEY_H)) {
+        if (RGFW_isKeyDown(RGFW_h)) {
             pan_left(&ctx);
         }
-        if (IsKeyDown(KEY_L)) {
+        if (RGFW_isKeyDown(RGFW_l)) {
             pan_right(&ctx);
         }
 
-        BeginDrawing();
-
-        ClearBackground(BACKGROUND_COLOR);
+        // drawing
+        
+        clear(BACKGROUND_COLOR);
         draw(&ctx);
-
-        EndDrawing();
+        RGFW_window_blitSurface(win, surface);
     }
 
     if (index < input_paths.count) {
@@ -464,7 +606,7 @@ int main(int argc, const char **argv) {
         draw_context_reset(&ctx);
     }
 
-    CloseWindow();
+    RGFW_window_close(win);
 
     arena_free(&global_arena);
 }
