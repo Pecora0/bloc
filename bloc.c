@@ -362,6 +362,28 @@ void set_color(uint8_t *buffer, size_t pixel_index, Color c) {
     buffer[pixel_index * 4 + 3] = c.a;
 }
 
+// Algorithm taken from https://github.com/raysan5/raylib/blob/master/src/rtextures.c
+void blend_color(uint8_t *buffer, size_t pixel_index, Color c) {
+    if (c.a == 0) {
+        return;
+    } else if (c.a == 255) {
+        set_color(buffer, pixel_index, c);
+    } else {
+        Color out = {255, 255, 255, 255};
+        Color dst = get_color(buffer, pixel_index);
+        unsigned int alpha = (unsigned int)c.a + 1;     // We are shifting by 8 (dividing by 256), so we need to take that excess into account
+        out.a = (unsigned char)(((unsigned int)alpha*256 + (unsigned int)dst.a*(256 - alpha)) >> 8);
+
+        if (out.a > 0)
+        {
+            out.r = (unsigned char)((((unsigned int)c.r*alpha*256 + (unsigned int)dst.r*(unsigned int)dst.a*(256 - alpha))/out.a) >> 8);
+            out.g = (unsigned char)((((unsigned int)c.g*alpha*256 + (unsigned int)dst.g*(unsigned int)dst.a*(256 - alpha))/out.a) >> 8);
+            out.b = (unsigned char)((((unsigned int)c.b*alpha*256 + (unsigned int)dst.b*(unsigned int)dst.a*(256 - alpha))/out.a) >> 8);
+        }
+        set_color(buffer, pixel_index, out);
+    }
+}
+
 void clear(Color c) {
     Rectangle screen = window_rectangle();
     for (size_t i=0; i<screen.height; i++) {
@@ -384,7 +406,7 @@ void draw_image(Draw_Context *ctx, Rectangle dst) {
             int index = floorf(pos.y) * ctx->width + floorf(pos.x);
             index = MAX(0, index);
             Color c = get_color(ctx->pixel_data, index);
-            set_color(pixel_buffer, i*pixel_stride + j, c);
+            blend_color(pixel_buffer, i*pixel_stride + j, c);
         }
     }
 }
@@ -395,8 +417,7 @@ void draw_rectangle(Rectangle r, Color c) {
     assert(r.height >= 0);
     for (int i=r.y; i<r.y+r.height; i++) {
         for (int j=r.x; j<r.x+r.width; j++) {
-            // TODO: proper blending
-            set_color(pixel_buffer, i*pixel_stride + j, c);
+            blend_color(pixel_buffer, i*pixel_stride + j, c);
         }
     }
 }
@@ -404,7 +425,7 @@ void draw_rectangle(Rectangle r, Color c) {
 Color color_alpha(Color c, float a) {
     a = fmaxf(a, 0);
     a = fminf(a, 1);
-    c.a = 255.0 * a;
+    c.a = (uint8_t) (255.0f * a);
     return c;
 }
 
@@ -502,7 +523,7 @@ void export(Draw_Context *ctx, const char *path) {
 
         for (int i=rec.y; i<rec.y+rec.height; i++) {
             for (int j=rec.x; j<rec.x+rec.width; j++) {
-                set_color(ctx->pixel_data, i*ctx->width + j, block_color);
+                blend_color(ctx->pixel_data, i*ctx->width + j, block_color);
             }
         }
     }
