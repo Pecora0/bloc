@@ -575,55 +575,62 @@ int main(int argc, const char **argv) {
     Draw_Context ctx = draw_context_new(input_paths.items[index]);
 
     bool exit_window = false;
+    bool redraw = false;
+    RGFW_event event;
     while (!exit_window) {
-        RGFW_pollEvents();
-        exit_window |= RGFW_window_shouldClose(win);
-
-        if (RGFW_window_isMousePressed(win, RGFW_mouseLeft)) {
-            click(&ctx);
-        }
-        if (RGFW_isKeyPressed(RGFW_u)) {
-            undo(&ctx);
-        }
-        if (RGFW_isKeyPressed(RGFW_r)) {
-            redo(&ctx);
-        }
-        if (RGFW_isKeyPressed(RGFW_enter)) {
-            if (ctx.stack.cursor >= 2) {
-                export(&ctx, output_paths.items[index]);
+        while (RGFW_window_checkEvent(win, &event)) {
+            redraw = true;
+            switch (event.type) {
+                case RGFW_quit:
+                    exit_window = true;
+                    break;
+                case RGFW_keyPressed:
+                    if (event.key.value == RGFW_window_getExitKey(win)) {
+                        exit_window = true;
+                    } else if (event.key.value == RGFW_u) {
+                        undo(&ctx);
+                    } else if (event.key.value == RGFW_r) {
+                        redo(&ctx);
+                    } else if (event.key.value == RGFW_enter) {
+                        if (ctx.stack.cursor >= 2) {
+                            export(&ctx, output_paths.items[index]);
+                        }
+                        draw_context_reset(&ctx);
+                        index++;
+                        if (index < input_paths.count) {
+                            draw_context_load(&ctx, input_paths.items[index]);
+                        } else {
+                            exit_window = true;
+                        }
+                    } else if (event.key.value == RGFW_j) {
+                        pan_down(&ctx);
+                    } else if (event.key.value == RGFW_k) {
+                        pan_up(&ctx);
+                    } else if (event.key.value == RGFW_h) {
+                        pan_left(&ctx);
+                    } else if (event.key.value == RGFW_l) {
+                        pan_right(&ctx);
+                    }
+                    break;
+                case RGFW_mouseButtonPressed:
+                    if (event.button.value == RGFW_mouseLeft) {
+                        click(&ctx);
+                    }
+                    break;
+                case RGFW_mouseScroll:
+                    // TODO: make it possible to zoom by keyboard presses (+/-)
+                    zoom(&ctx, get_mouse_wheel_move());
+                    break;
             }
-            draw_context_reset(&ctx);
-            index++;
-            if (index < input_paths.count) {
-                draw_context_load(&ctx, input_paths.items[index]);
-            } else {
-                exit_window = true;
-                break;
-            }
-        }
-
-        // TODO: make it possible to zoom by keyboard presses (+/-)
-        zoom(&ctx, get_mouse_wheel_move());
-
-        // pan
-        if (RGFW_isKeyDown(RGFW_j)) {
-            pan_down(&ctx);
-        }
-        if (RGFW_isKeyDown(RGFW_k)) {
-            pan_up(&ctx);
-        }
-        if (RGFW_isKeyDown(RGFW_h)) {
-            pan_left(&ctx);
-        }
-        if (RGFW_isKeyDown(RGFW_l)) {
-            pan_right(&ctx);
         }
 
         // drawing
-        
-        clear(BACKGROUND_COLOR);
-        draw(&ctx);
-        RGFW_window_blitSurface(win, surface);
+        if (!exit_window && redraw) { // memory may be invalidated when exit_window is true
+            clear(BACKGROUND_COLOR);
+            draw(&ctx);
+            RGFW_window_blitSurface(win, surface);
+            redraw = false;
+        }
     }
 
     if (index < input_paths.count) {
