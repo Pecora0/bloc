@@ -57,9 +57,8 @@ typedef struct Color {
 typedef struct {
     unsigned char *pixel_data;
     int width, height;
-    // TODO: 'part' has to much information. We just need a point and a zoom level, 
-    // the aspect ratio should be determined by the screen dimensions
-    Rectangle part;
+    Vector2 center;
+    float scale;
     Vector_Stack stack;
 } Draw_Context;
 
@@ -90,20 +89,6 @@ Rectangle hull(Vector2 a, Vector2 b) {
     return result;
 }
 
-Rectangle fit(Rectangle outer, float aspect) {
-    // aspect = width / height
-    assert(aspect > 0);
-    Rectangle result;
-    result.width = MIN(aspect * outer.height, outer.width);
-    result.height = result.width / aspect;
-
-    //center
-    result.x = (outer.width - result.width) / 2   + outer.x;
-    result.y = (outer.height - result.height) / 2 + outer.y;
-
-    return result;
-}
-
 Rectangle intersect(Rectangle r, Rectangle s) {
     if (r.width  < 0) UNIMPLEMENTED("intersect");
     if (r.height < 0) UNIMPLEMENTED("intersect");
@@ -117,16 +102,6 @@ Rectangle intersect(Rectangle r, Rectangle s) {
         .y = y,
         .width  = fmin(r.x + r.width , s.x + s.width)  - x,
         .height = fmin(r.y + r.height, s.y + s.height) - y,
-    };
-    return result;
-}
-
-Rectangle texture_rectangle(Draw_Context *ctx) {
-    Rectangle result = {
-        .x = 0,
-        .y = 0,
-        .width = ctx->width,
-        .height = ctx->height,
     };
     return result;
 }
@@ -283,11 +258,11 @@ void draw_context_load(Draw_Context *ctx, const char *path) {
     ctx->width = width;
     ctx->height = height;
 
-    ctx->part = (Rectangle) {
-        .x = 0, .y = 0,
-        .width = width,
-        .height = height,
+    ctx->center = (Vector2) {
+        .x = width / 2.0f,
+        .y = height / 2.0f,
     };
+    ctx->scale = 1;
 }
 
 Draw_Context draw_context_new(const char *path) {
@@ -385,16 +360,25 @@ void draw_image(Draw_Context *ctx, Rectangle dst) {
     dst = intersect(dst, window_rectangle());
     assert(dst.width >= 0);
     assert(dst.height >= 0);
+    Rectangle image_part = {
+        .width  = dst.width  / ctx->scale,
+        .height = dst.height / ctx->scale,
+        .x = ctx->center.x - 0.5f * dst.width  / ctx->scale,
+        .y = ctx->center.y - 0.5f * dst.height / ctx->scale,
+    };
     for (int i=dst.y; i<dst.y+dst.height; i++) {
         for (int j=dst.x; j<dst.x+dst.width; j++) {
             Vector2 pos = {(float) j, (float) i};
             pos = rectangle_transform(pos, rectangle_invert(dst));
-            pos = rectangle_transform(pos, ctx->part);
+            pos = rectangle_transform(pos, image_part);
 
-            int index = floorf(pos.y) * ctx->width + floorf(pos.x);
-            index = MAX(0, index);
-            Color c = get_color(ctx->pixel_data, index);
-            blend_color(pixel_buffer, i*pixel_stride + j, c);
+            int x = floorf(pos.x);
+            int y = floorf(pos.y);
+            if (0 <= x && x < ctx->width && 0 <= y && y < ctx->height) {
+                int index = y * ctx->width + x;
+                Color c = get_color(ctx->pixel_data, index);
+                blend_color(pixel_buffer, i*pixel_stride + j, c);
+            }
         }
     }
 }
@@ -419,16 +403,21 @@ Color color_alpha(Color c, float a) {
 
 void draw(Draw_Context *ctx) {
     Rectangle screen = window_rectangle();
-    Rectangle display = fit(screen, ctx->part.width / ctx->part.height);
+    Rectangle image_part = {
+        .width  = screen.width  / ctx->scale,
+        .height = screen.height / ctx->scale,
+        .x = ctx->center.x - 0.5f * screen.width  / ctx->scale,
+        .y = ctx->center.y - 0.5f * screen.height / ctx->scale,
+    };
     Rectangle screen_to_tex = rectangle_multiply(
-            rectangle_invert(display),
-            ctx->part
+            rectangle_invert(screen),
+            image_part
             );
     Rectangle tex_to_screen = rectangle_invert(screen_to_tex);
 
     Vector2 mouse_screen = get_mouse_position();
 
-    draw_image(ctx, display);
+    draw_image(ctx, screen);
 
     for (size_t i=0; i< ctx->stack.cursor/2; i++) {
         Rectangle r = hull(
@@ -461,11 +450,16 @@ void redo(Draw_Context *ctx) {
 
 void click(Draw_Context *ctx) {
     Rectangle screen = window_rectangle();
-    Rectangle display = fit(screen, ctx->part.width / ctx->part.height);
+    Rectangle image_part = {
+        .width  = screen.width  / ctx->scale,
+        .height = screen.height / ctx->scale,
+        .x = ctx->center.x - 0.5f * screen.width  / ctx->scale,
+        .y = ctx->center.y - 0.5f * screen.height / ctx->scale,
+    };
 
     Rectangle screen_to_tex = rectangle_multiply(
-            rectangle_invert(display),
-            ctx->part
+            rectangle_invert(screen),
+            image_part
             );
     Vector2 mouse_screen = get_mouse_position();
     Vector2 mouse_tex    = rectangle_transform(mouse_screen, screen_to_tex);
@@ -474,31 +468,27 @@ void click(Draw_Context *ctx) {
 }
 
 void pan_down(Draw_Context *ctx) {
-    float d = PAN_STEP * ctx->part.height;
-    ctx->part.y += d;
-    float border = texture_rectangle(ctx).y + texture_rectangle(ctx).height - ctx->part.height;
-    ctx->part.y = MIN(ctx->part.y, border);
+    Rectangle screen = window_rectangle();
+    float d = PAN_STEP * screen.height / ctx->scale;
+    ctx->center.y += d;
 }
 
 void pan_up(Draw_Context *ctx) {
-    float d = PAN_STEP * ctx->part.height;
-    ctx->part.y -= d;
-    float border = texture_rectangle(ctx).y;
-    ctx->part.y = MAX(ctx->part.y, border);
+    Rectangle screen = window_rectangle();
+    float d = PAN_STEP * screen.height / ctx->scale;
+    ctx->center.y -= d;
 }
 
 void pan_left(Draw_Context *ctx) {
-    float d = PAN_STEP * ctx->part.width;
-    ctx->part.x -= d;
-    float border = texture_rectangle(ctx).x;
-    ctx->part.x = MAX(ctx->part.x, border);
+    Rectangle screen = window_rectangle();
+    float d = PAN_STEP * screen.width / ctx->scale;
+    ctx->center.x -= d;
 }
 
 void pan_right(Draw_Context *ctx) {
-    float d = PAN_STEP * ctx->part.width;
-    ctx->part.x += d;
-    float border = texture_rectangle(ctx).x + texture_rectangle(ctx).width - ctx->part.width;
-    ctx->part.x = MIN(ctx->part.x, border);
+    Rectangle screen = window_rectangle();
+    float d = PAN_STEP * screen.width / ctx->scale;
+    ctx->center.x += d;
 }
 
 void export(Draw_Context *ctx, const char *path) {
@@ -541,21 +531,19 @@ void export(Draw_Context *ctx, const char *path) {
     printf("[INFO] wrote file '%s'\n", path);
 }
 
-// TODO: this behaves weirdly, we should change the aspect ratio when zooming in to fit the screen better
 void zoom(Draw_Context *ctx, float steps) {
-    float scaler = 1 - ZOOM_STEP*steps;
     Rectangle screen = window_rectangle();
-    Rectangle display = fit(screen, ctx->part.width / ctx->part.height);
     Vector2 mouse_screen = get_mouse_position();
+    Vector2 mouse_normal = rectangle_transform(mouse_screen, rectangle_invert(screen));
 
-    // math that makes sure that width and height are scaled by scaler and that mouse_tex stays constant
-    Vector2 help = rectangle_transform(mouse_screen, rectangle_invert(display));
-    ctx->part.x += (1 - scaler) * ctx->part.width  * help.x;
-    ctx->part.y += (1 - scaler) * ctx->part.height * help.y;
-    ctx->part.width  *= scaler;
-    ctx->part.height *= scaler;
+    float new_scale = ctx->scale * (1 + ZOOM_STEP*steps);
+    Vector2 new_center = {
+        .x = ctx->center.x + screen.width  * (mouse_normal.x - 0.5f) * (1.0 / ctx->scale - 1.0 / new_scale),
+        .y = ctx->center.y + screen.height * (mouse_normal.y - 0.5f) * (1.0 / ctx->scale - 1.0 / new_scale),
+    };
 
-    ctx->part = intersect(texture_rectangle(ctx), ctx->part);
+    ctx->scale = new_scale;
+    ctx->center = new_center;
 }
 
 int main(int argc, const char **argv) {
@@ -573,6 +561,7 @@ int main(int argc, const char **argv) {
 
     size_t index = 0;
     Draw_Context ctx = draw_context_new(input_paths.items[index]);
+    // TODO: the scale should be set such that the picture fits on screen on startup
 
     bool exit_window = false;
     bool redraw = false;
