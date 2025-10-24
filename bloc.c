@@ -358,8 +358,8 @@ void clear(Color c) {
 
 void draw_image(Draw_Context *ctx, Rectangle dst) {
     dst = intersect(dst, window_rectangle());
-    assert(dst.width >= 0);
-    assert(dst.height >= 0);
+    if (dst.width <= 0) return;
+    if (dst.height <= 0) return;
     Rectangle image_part = {
         .width  = dst.width  / ctx->scale,
         .height = dst.height / ctx->scale,
@@ -385,8 +385,8 @@ void draw_image(Draw_Context *ctx, Rectangle dst) {
 
 void draw_rectangle(Rectangle r, Color c) {
     r = intersect(r, window_rectangle());
-    assert(r.width >= 0);
-    assert(r.height >= 0);
+    if (r.width <= 0) return;
+    if (r.height <= 0) return;
     for (int i=r.y; i<r.y+r.height; i++) {
         for (int j=r.x; j<r.x+r.width; j++) {
             blend_color(pixel_buffer, i*pixel_stride + j, c);
@@ -494,13 +494,9 @@ void pan_right(Draw_Context *ctx) {
 void export(Draw_Context *ctx, const char *path) {
     for (size_t i=0; i<ctx->stack.cursor/2; i++) {
         Rectangle rec = hull(ctx->stack.items[2*i], ctx->stack.items[2*i+1]);
-        assert(rec.x >= 0);
-        assert(rec.y >= 0);
-        assert(rec.x+rec.width < ctx->width);
-        assert(rec.y+rec.height < ctx->height);
 
-        for (int i=rec.y; i<rec.y+rec.height; i++) {
-            for (int j=rec.x; j<rec.x+rec.width; j++) {
+        for (int i=MAX(rec.y, 0); i<MIN(rec.y+rec.height, ctx->height-1); i++) {
+            for (int j=MAX(rec.x, 0); j<MIN(rec.x+rec.width, ctx->width-1); j++) {
                 blend_color(ctx->pixel_data, i*ctx->width + j, block_color);
             }
         }
