@@ -89,23 +89,6 @@ Rectangle hull(Vector2 a, Vector2 b) {
     return result;
 }
 
-Rectangle intersect(Rectangle r, Rectangle s) {
-    if (r.width  < 0) UNIMPLEMENTED("intersect");
-    if (r.height < 0) UNIMPLEMENTED("intersect");
-    if (s.width  < 0) UNIMPLEMENTED("intersect");
-    if (s.height < 0) UNIMPLEMENTED("intersect");
-
-    float x = fmax(r.x, s.x);
-    float y = fmax(r.y, s.y);
-    Rectangle result = {
-        .x = x,
-        .y = y,
-        .width  = fmin(r.x + r.width , s.x + s.width)  - x,
-        .height = fmin(r.y + r.height, s.y + s.height) - y,
-    };
-    return result;
-}
-
 // NOTE: it makes sense to view a rectangle r as the affine transformation
 // (x , y) -> (r.width * x + r.x , r.height * y + r.y)
 // represented by the matrix
@@ -137,6 +120,37 @@ Rectangle rectangle_invert(Rectangle a) {
         .height = 1 / a.height,
         .x = - a.x / a.width,
         .y = - a.y / a.height,
+    };
+    return result;
+}
+
+// NOTE: it makes sense to view a rectangle r as a subset of the 2D plane
+// { (x,y) | x = r.x + t*r.width, y = r.y + s*r.height where 0 <= s,t <= 1 }
+
+bool in_rectangle(Vector2 v, Rectangle r) {
+    if (r.width  < 0) UNIMPLEMENTED("in_rectangle");
+    if (r.height < 0) UNIMPLEMENTED("in_rectangle");
+
+    if (v.x < r.x) return false;
+    if (v.x > r.x+r.width) return false;
+    if (v.y < r.y) return false;
+    if (v.y > r.y+r.height) return false;
+    return true;
+}
+
+Rectangle intersect(Rectangle r, Rectangle s) {
+    if (r.width  < 0) UNIMPLEMENTED("intersect");
+    if (r.height < 0) UNIMPLEMENTED("intersect");
+    if (s.width  < 0) UNIMPLEMENTED("intersect");
+    if (s.height < 0) UNIMPLEMENTED("intersect");
+
+    float x = fmax(r.x, s.x);
+    float y = fmax(r.y, s.y);
+    Rectangle result = {
+        .x = x,
+        .y = y,
+        .width  = fmin(r.x + r.width , s.x + s.width)  - x,
+        .height = fmin(r.y + r.height, s.y + s.height) - y,
     };
     return result;
 }
@@ -308,6 +322,15 @@ Rectangle window_rectangle() {
     return result;
 }
 
+Rectangle image_rectangle(Draw_Context *ctx) {
+    Rectangle result = {
+        .x = 0, .y = 0,
+        .width  = ctx->width,
+        .height = ctx->height,
+    };
+    return result;
+}
+
 Color get_color(uint8_t *buffer, size_t pixel_index) {
     Color result = {
         .r = buffer[pixel_index * 4 + 0],
@@ -372,10 +395,8 @@ void draw_image(Draw_Context *ctx, Rectangle dst) {
             pos = rectangle_transform(pos, rectangle_invert(dst));
             pos = rectangle_transform(pos, image_part);
 
-            int x = floorf(pos.x);
-            int y = floorf(pos.y);
-            if (0 <= x && x < ctx->width && 0 <= y && y < ctx->height) {
-                int index = y * ctx->width + x;
+            if (in_rectangle(pos, image_rectangle(ctx))) {
+                int index = floorf(pos.y) * ctx->width + floorf(pos.x);
                 Color c = get_color(ctx->pixel_data, index);
                 blend_color(pixel_buffer, i*pixel_stride + j, c);
             }
@@ -464,7 +485,9 @@ void click(Draw_Context *ctx) {
     Vector2 mouse_screen = get_mouse_position();
     Vector2 mouse_tex    = rectangle_transform(mouse_screen, screen_to_tex);
 
-    push_point(&ctx->stack, mouse_tex);
+    if (in_rectangle(mouse_tex, image_rectangle(ctx))) {
+        push_point(&ctx->stack, mouse_tex);
+    }
 }
 
 void pan_down(Draw_Context *ctx) {
@@ -489,6 +512,16 @@ void pan_right(Draw_Context *ctx) {
     Rectangle screen = window_rectangle();
     float d = PAN_STEP * screen.width / ctx->scale;
     ctx->center.x += d;
+}
+
+// center and rescale the image view such that it fits in the window and is as big as possible
+void fit(Draw_Context *ctx) {
+    Vector2 half = {.x = 0.5, .y = 0.5};
+    ctx->center = rectangle_transform(half, image_rectangle(ctx));
+    Rectangle screen = window_rectangle();
+    float ws = screen.width / ctx->width;
+    float hs = screen.height / ctx->height;
+    ctx->scale = fminf(ws, hs);
 }
 
 void export(Draw_Context *ctx, const char *path) {
@@ -557,7 +590,7 @@ int main(int argc, const char **argv) {
 
     size_t index = 0;
     Draw_Context ctx = draw_context_new(input_paths.items[index]);
-    // TODO: the scale should be set such that the picture fits on screen on startup
+    fit(&ctx);
 
     bool exit_window = false;
     bool redraw = false;
@@ -595,6 +628,8 @@ int main(int argc, const char **argv) {
                         pan_left(&ctx);
                     } else if (event.key.value == RGFW_l) {
                         pan_right(&ctx);
+                    } else if (event.key.value == RGFW_space) {
+                        fit(&ctx);
                     }
                     break;
                 case RGFW_mouseButtonPressed:
