@@ -138,23 +138,6 @@ bool in_rectangle(Vector2 v, Rectangle r) {
     return true;
 }
 
-Rectangle intersect(Rectangle r, Rectangle s) {
-    if (r.width  < 0) UNIMPLEMENTED("intersect");
-    if (r.height < 0) UNIMPLEMENTED("intersect");
-    if (s.width  < 0) UNIMPLEMENTED("intersect");
-    if (s.height < 0) UNIMPLEMENTED("intersect");
-
-    float x = fmax(r.x, s.x);
-    float y = fmax(r.y, s.y);
-    Rectangle result = {
-        .x = x,
-        .y = y,
-        .width  = fmin(r.x + r.width , s.x + s.width)  - x,
-        .height = fmin(r.y + r.height, s.y + s.height) - y,
-    };
-    return result;
-}
-
 void push_point(Vector_Stack *stack, Vector2 v) {
     if (stack->capacity == 0) {
         stack->capacity = 16;
@@ -380,20 +363,18 @@ void clear(Color c) {
 }
 
 void draw_image(Draw_Context *ctx, Rectangle dst) {
-    dst = intersect(dst, window_rectangle());
-    if (dst.width <= 0) return;
-    if (dst.height <= 0) return;
+    Rectangle screen = window_rectangle();
     Rectangle image_part = {
         .width  = dst.width  / ctx->scale,
         .height = dst.height / ctx->scale,
         .x = ctx->center.x - 0.5f * dst.width  / ctx->scale,
         .y = ctx->center.y - 0.5f * dst.height / ctx->scale,
     };
-    for (int i=dst.y; i<dst.y+dst.height; i++) {
-        for (int j=dst.x; j<dst.x+dst.width; j++) {
+    Rectangle dst_to_part = rectangle_multiply(rectangle_invert(dst), image_part);
+    for (int i=MAX(0, dst.y); i<MIN(screen.height, dst.y+dst.height); i++) {
+        for (int j=MAX(0, dst.x); j<MIN(screen.width, dst.x+dst.width); j++) {
             Vector2 pos = {(float) j, (float) i};
-            pos = rectangle_transform(pos, rectangle_invert(dst));
-            pos = rectangle_transform(pos, image_part);
+            pos = rectangle_transform(pos, dst_to_part);
 
             if (in_rectangle(pos, image_rectangle(ctx))) {
                 int index = floorf(pos.y) * ctx->width + floorf(pos.x);
@@ -405,11 +386,9 @@ void draw_image(Draw_Context *ctx, Rectangle dst) {
 }
 
 void draw_rectangle(Rectangle r, Color c) {
-    r = intersect(r, window_rectangle());
-    if (r.width <= 0) return;
-    if (r.height <= 0) return;
-    for (int i=r.y; i<r.y+r.height; i++) {
-        for (int j=r.x; j<r.x+r.width; j++) {
+    Rectangle screen = window_rectangle();
+    for (int i=MAX(0, r.y); i<MIN(screen.height, r.y+r.height); i++) {
+        for (int j=MAX(0, r.x); j<MIN(screen.width, r.x+r.width); j++) {
             blend_color(pixel_buffer, i*pixel_stride + j, c);
         }
     }
